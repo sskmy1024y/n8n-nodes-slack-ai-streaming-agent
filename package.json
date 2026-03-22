@@ -12,7 +12,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && cp -r nodes/**/*.svg dist/nodes/ 2>/dev/null || true",
+    "build": "tsc && cp nodes/SlackAiStreamingAgent/*.svg dist/nodes/SlackAiStreamingAgent/ && cp nodes/SlackAiStreamingAgent/*.json dist/nodes/SlackAiStreamingAgent/",
     "dev": "tsc --watch",
     "lint": "tsc --noEmit",
     "test": "jest",
