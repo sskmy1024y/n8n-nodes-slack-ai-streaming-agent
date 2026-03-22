@@ -5,7 +5,7 @@ on:
     types: [published]
 
 jobs:
-  publish:
+  publish-npm:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -15,8 +15,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
+          node-version: 22
+
+      - run: npm install -g npm@latest
 
       - run: npm ci
 
@@ -26,6 +27,37 @@ jobs:
 
       - run: npm run build
 
+      - run: npm config set registry https://registry.npmjs.org/
+
       - run: npm publish --provenance --access public
+
+  publish-github:
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: '@sskmy1024y'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      # GitHub Packages requires scoped package name
+      - run: |
+          node -e "
+            const pkg = require('./package.json');
+            pkg.name = '@sskmy1024y/n8n-nodes-slack-ai-streaming-agent';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+
+      - run: npm publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
