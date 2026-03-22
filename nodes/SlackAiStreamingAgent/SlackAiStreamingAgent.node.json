@@ -1,0 +1,9 @@
+{
+  "node": "n8n-nodes-slack-ai-streaming-agent.slackAiStreamingAgent",
+  "nodeVersion": "1.0",
+  "codexVersion": "1.0",
+  "categories": ["AI"],
+  "subcategories": {
+    "AI": ["Agents"]
+  }
+}

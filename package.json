@@ -1,0 +1,50 @@
+{
+  "name": "n8n-nodes-slack-ai-streaming-agent",
+  "version": "0.1.0",
+  "description": "n8n AI Agent node with native Slack streaming output",
+  "keywords": [
+    "n8n-community-node-package"
+  ],
+  "license": "MIT",
+  "author": "",
+  "main": "dist/nodes/SlackAiStreamingAgent/SlackAiStreamingAgent.node.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && cp -r nodes/**/*.svg dist/nodes/ 2>/dev/null || true",
+    "dev": "tsc --watch",
+    "lint": "tsc --noEmit",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/SlackAiApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/SlackAiStreamingAgent/SlackAiStreamingAgent.node.js"
+    ]
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/google": "^1.0.0",
+    "@ai-sdk/openai": "^1.0.0",
+    "@slack/web-api": "^7.0.0",
+    "ai": "^4.0.0",
+    "zod": "^3.22.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "jest": "^30.3.0",
+    "n8n-workflow": "^1.0.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.3.0"
+  }
+}
