@@ -21,12 +21,15 @@ function createMockStreamManager(): SlackStreamManager & {
 } {
   const appendedTexts: string[] = [];
   const taskUpdates: Array<{ taskId: string; title: string; status: string }> = [];
+  let fullText = '';
 
   return {
     appendedTexts,
     taskUpdates,
+    get responseText() { return fullText; },
     appendText: jest.fn(async (text: string) => {
       appendedTexts.push(text);
+      fullText += text;
     }),
     sendTaskUpdate: jest.fn(async (taskId: string, title: string, status: string) => {
       taskUpdates.push({ taskId, title, status });
@@ -190,21 +193,35 @@ describe('executeAgent', () => {
   });
 
   it('builds newMessages with tool call/result structure', async () => {
-    mockStreamText.mockImplementation(() => {
-      return createMockStreamResult({
-        chunks: ['The answer is 42.'],
+    mockStreamText.mockImplementation((opts: Record<string, unknown>) => {
+      const onStepFinish = opts['onStepFinish'] as (step: Record<string, unknown>) => Promise<void>;
+
+      async function* textGen() {
+        // Trigger onStepFinish before text
+        await onStepFinish({
+          toolCalls: [
+            { toolCallId: 'tc_1', toolName: 'calc', args: { x: 6, y: 7 } },
+          ],
+          toolResults: [
+            { toolCallId: 'tc_1', toolName: 'calc', result: '42' },
+          ],
+        });
+        yield 'The answer is 42.';
+      }
+
+      const resolvedResult = {
         usage: { totalTokens: 30 },
-        steps: [
-          {
-            toolCalls: [
-              { toolCallId: 'tc_1', toolName: 'calc', args: { x: 6, y: 7 } },
-            ],
-            toolResults: [
-              { toolCallId: 'tc_1', toolName: 'calc', result: '42' },
-            ],
-          },
-        ],
-      }) as unknown as ReturnType<typeof streamText>;
+        steps: [],
+      };
+
+      return {
+        textStream: textGen(),
+        usage: resolvedResult.usage,
+        steps: resolvedResult.steps,
+        then(resolve: (val: typeof resolvedResult) => void) {
+          resolve(resolvedResult);
+        },
+      } as unknown as ReturnType<typeof streamText>;
     });
 
     const streamManager = createMockStreamManager();

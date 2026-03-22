@@ -287,11 +287,11 @@ describe('SlackStreamManager', () => {
       const appendCallsBefore = apiCall.mock.calls.filter((c) => c[0] === 'chat.appendStream');
       expect(appendCallsBefore).toHaveLength(1); // only the ' ' was sent
 
-      // Stop includes remaining buffer in stopStream chunks (not via appendStream)
+      // Stop flushes remaining buffer via appendStream before calling stopStream
       await manager.stop();
-      const stopCall = apiCall.mock.calls.find((c) => c[0] === 'chat.stopStream');
-      expect(stopCall).toBeDefined();
-      expect((stopCall![1] as Record<string, unknown>)['chunks']).toEqual([
+      const allAppendCalls = apiCall.mock.calls.filter((c) => c[0] === 'chat.appendStream');
+      expect(allAppendCalls).toHaveLength(2); // ' ' + 'World!'
+      expect((allAppendCalls[1][1] as Record<string, unknown>)['chunks']).toEqual([
         { type: 'markdown_text', markdown_text: 'World!' },
       ]);
     });

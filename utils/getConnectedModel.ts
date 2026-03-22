@@ -128,21 +128,3 @@ export async function getConnectedModel(
   return convertN8nModelToAiSdk(model);
 }
 
-/**
- * Extract model settings (temperature, etc.) from the LangChain model object.
- */
-export function extractModelSettings(langchainModel: unknown): {
-  temperature?: number;
-  topP?: number;
-  maxTokens?: number;
-} {
-  const model = langchainModel as Record<string, unknown>;
-  const temp = deepSearch(model, ['temperature']);
-  const topP = deepSearch(model, ['topP', 'top_p']);
-  const maxTokens = deepSearch(model, ['maxTokens', 'maxOutputTokens', 'max_tokens']);
-  return {
-    temperature: temp ? Number(temp) : undefined,
-    topP: topP ? Number(topP) : undefined,
-    maxTokens: maxTokens ? Number(maxTokens) : undefined,
-  };
-}

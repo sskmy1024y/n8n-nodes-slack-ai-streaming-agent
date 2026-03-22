@@ -29,13 +29,6 @@ export interface PlanUpdateChunk extends SlackStreamChunk {
 
 export type StreamChunk = MarkdownTextChunk | TaskUpdateChunk | PlanUpdateChunk;
 
-// Slack API response types
-export interface SlackStartStreamResponse {
-  ok: boolean;
-  ts?: string;
-  error?: string;
-}
-
 // Feedback blocks
 export interface FeedbackBlock {
   type: 'context_actions';
@@ -56,17 +49,6 @@ export interface FeedbackBlock {
 // Node parameter types
 export type TaskDisplayMode = 'timeline' | 'plan';
 export type PromptSource = 'takePreviousNode' | 'defineBelow';
-
-// Agent execution result
-export interface AgentExecutionResult {
-  messageTs: string | null;
-  channel: string;
-  threadTs: string;
-  responseText: string;
-  intermediateSteps: IntermediateStep[];
-  tokenCount?: number;
-  durationMs: number;
-}
 
 export interface IntermediateStep {
   toolName: string;

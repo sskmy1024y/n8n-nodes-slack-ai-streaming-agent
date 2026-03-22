@@ -1,9 +1,6 @@
 import type { WebClient } from '@slack/web-api';
 import type { StreamChunk, TaskDisplayMode, FeedbackBlock } from './types';
 
-/**
- * Throttler that buffers text chunks and flushes them at a minimum interval.
- */
 class SlackStreamThrottler {
   private buffer = '';
   private lastSendTime = 0;
@@ -33,9 +30,6 @@ class SlackStreamThrottler {
     }
   }
 
-  /**
-   * Drain and return the remaining buffer without sending.
-   */
   drain(): string {
     const remaining = this.buffer;
     this.buffer = '';
@@ -54,10 +48,6 @@ export interface SlackStreamManagerOptions {
   enableFeedback?: boolean;
 }
 
-/**
- * Manages the lifecycle of a Slack streaming message.
- * Handles startStream → appendStream × N → stopStream with throttling and fallback.
- */
 export class SlackStreamManager {
   private client: WebClient;
   private channel: string;
@@ -70,7 +60,6 @@ export class SlackStreamManager {
 
   private streamTs: string | null = null;
   private fullText = '';
-  private isStarted = false;
   private isStopped = false;
   private useFallback = false;
 
@@ -93,9 +82,6 @@ export class SlackStreamManager {
     return this.fullText;
   }
 
-  /**
-   * Set the assistant thread status (e.g. "thinking...").
-   */
   async setStatus(status: string): Promise<void> {
     try {
       await this.client.apiCall('assistant.threads.setStatus', {
@@ -103,15 +89,11 @@ export class SlackStreamManager {
         thread_ts: this.threadTs,
         status,
       });
-    } catch (error) {
-      // Status is non-critical, don't fail the stream
-      console.warn('Failed to set assistant status:', error);
+    } catch {
+      // Non-critical
     }
   }
 
-  /**
-   * Set the thread title.
-   */
   async setTitle(title: string): Promise<void> {
     try {
       await this.client.apiCall('assistant.threads.setTitle', {
@@ -119,42 +101,26 @@ export class SlackStreamManager {
         thread_ts: this.threadTs,
         title,
       });
-    } catch (error) {
-      console.warn('Failed to set thread title:', error);
+    } catch {
+      // Non-critical
     }
   }
 
-  /**
-   * Append a text delta to the stream. Automatically starts the stream on first call.
-   */
   async appendText(delta: string): Promise<void> {
     if (this.isStopped || this.useFallback) return;
 
     this.fullText += delta;
 
-    if (!this.isStarted) {
+    if (!this.streamTs) {
       await this.startStream(delta);
       return;
     }
 
-    await this.throttler.append(delta, async (text) => {
-      try {
-        await this.client.apiCall('chat.appendStream', {
-          channel: this.channel,
-          message_ts: this.streamTs,
-          thread_ts: this.threadTs,
-          chunks: [{ type: 'markdown_text', markdown_text: text }],
-        });
-      } catch (error) {
-        console.warn('appendStream failed, will use fallback:', error);
-        this.useFallback = true;
-      }
-    });
+    await this.throttler.append(delta, (text) =>
+      this.sendAppendStream([{ type: 'markdown_text', markdown_text: text }]),
+    );
   }
 
-  /**
-   * Send a task_update chunk (for tool execution status).
-   */
   async sendTaskUpdate(
     taskId: string,
     title: string,
@@ -164,80 +130,70 @@ export class SlackStreamManager {
     if (!this.streamTs || this.isStopped || this.useFallback) return;
 
     // Flush pending text first to maintain ordering
-    await this.throttler.flush(async (text) => {
-      try {
-        await this.client.apiCall('chat.appendStream', {
-          channel: this.channel,
-          message_ts: this.streamTs,
-          thread_ts: this.threadTs,
-          chunks: [{ type: 'markdown_text', markdown_text: text }],
-        });
-      } catch {
-        this.useFallback = true;
-      }
-    });
+    await this.throttler.flush((text) =>
+      this.sendAppendStream([{ type: 'markdown_text', markdown_text: text }]),
+    );
 
     if (this.useFallback) return;
 
-    try {
-      const chunk: StreamChunk = {
-        type: 'task_update',
-        task: {
-          task_id: taskId,
-          title,
-          status,
-          ...(details ? { details } : {}),
-        },
-      };
-      await this.client.apiCall('chat.appendStream', {
-        channel: this.channel,
-        message_ts: this.streamTs,
-        thread_ts: this.threadTs,
-        chunks: [chunk],
-      });
-    } catch (error) {
-      console.warn('task_update appendStream failed:', error);
-    }
+    const chunk: StreamChunk = {
+      type: 'task_update',
+      task: {
+        task_id: taskId,
+        title,
+        status,
+        ...(details ? { details } : {}),
+      },
+    };
+    await this.sendAppendStream([chunk]);
   }
 
-  /**
-   * Stop the stream and finalize the message.
-   */
   async stop(): Promise<void> {
     if (this.isStopped) return;
     this.isStopped = true;
 
-    // If we never started (no text generated), use fallback
-    if (!this.isStarted || this.useFallback) {
+    if (!this.streamTs || this.useFallback) {
       await this.postFallbackMessage();
       return;
     }
 
-    // Drain remaining buffer — include it in stopStream chunks instead of
-    // sending a separate appendStream to avoid race conditions.
+    // Flush remaining buffer via appendStream, then wait briefly before stopping.
+    // stopStream's chunks param is unreliable for final text delivery.
     const remaining = this.throttler.drain();
+    if (remaining.length > 0) {
+      await this.sendAppendStream([{ type: 'markdown_text', markdown_text: remaining }]);
+    }
+
+    // Small delay to ensure Slack processes the last appendStream before stopping
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     try {
       const blocks = this.enableFeedback ? this.buildFeedbackBlocks() : undefined;
-      const chunks: Array<{ type: string; markdown_text?: string }> = [];
-      if (remaining.length > 0) {
-        chunks.push({ type: 'markdown_text', markdown_text: remaining });
-      }
-
       await this.client.apiCall('chat.stopStream', {
         channel: this.channel,
         message_ts: this.streamTs,
         thread_ts: this.threadTs,
-        chunks,
+        chunks: [],
         ...(blocks ? { blocks } : {}),
       });
-    } catch (error) {
-      console.warn('stopStream failed, using fallback:', error);
+    } catch {
       await this.postFallbackMessage();
     }
 
-    // Clear the status
     await this.setStatus('');
+  }
+
+  private async sendAppendStream(chunks: unknown[]): Promise<void> {
+    try {
+      await this.client.apiCall('chat.appendStream', {
+        channel: this.channel,
+        message_ts: this.streamTs,
+        thread_ts: this.threadTs,
+        chunks,
+      });
+    } catch {
+      this.useFallback = true;
+    }
   }
 
   private async startStream(firstChunk: string): Promise<void> {
@@ -254,20 +210,14 @@ export class SlackStreamManager {
       const result = response as { ok: boolean; ts?: string; error?: string };
       if (result.ok && result.ts) {
         this.streamTs = result.ts;
-        this.isStarted = true;
       } else {
-        console.warn('startStream returned error:', result.error);
         this.useFallback = true;
       }
-    } catch (error) {
-      console.warn('startStream failed, using fallback:', error);
+    } catch {
       this.useFallback = true;
     }
   }
 
-  /**
-   * Fallback: post the full response as a regular message.
-   */
   private async postFallbackMessage(): Promise<void> {
     if (!this.fullText) return;
 
@@ -279,8 +229,8 @@ export class SlackStreamManager {
         ...(this.enableFeedback ? { blocks: this.buildFeedbackBlocks() } : {}),
       });
       this.streamTs = response.ts ?? null;
-    } catch (error) {
-      console.error('Fallback postMessage also failed:', error);
+    } catch {
+      // Last resort failed
     }
   }
 

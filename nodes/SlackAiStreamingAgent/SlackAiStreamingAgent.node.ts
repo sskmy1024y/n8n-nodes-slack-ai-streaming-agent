@@ -227,14 +227,12 @@ export class SlackAiStreamingAgent implements INodeType {
     const items = this.getInputData();
     const returnData: INodeExecutionData[] = [];
 
+    const credentials = await this.getCredentials('slackApi');
+    const slackClient = new WebClient(credentials.accessToken as string);
+
     for (let i = 0; i < items.length; i++) {
       const startTime = Date.now();
 
-      // Get credentials
-      const credentials = await this.getCredentials('slackApi');
-      const slackClient = new WebClient(credentials.accessToken as string);
-
-      // Get parameters
       const channel = this.getNodeParameter('channelId', i) as string;
       const threadTs = this.getNodeParameter('threadTs', i) as string;
       const userId = this.getNodeParameter('recipientUserId', i) as string;
@@ -282,35 +280,32 @@ export class SlackAiStreamingAgent implements INodeType {
       });
 
       try {
-        // 1. Set thinking status
         await streamManager.setStatus('thinking...');
 
-        // 2. Get connected sub-nodes
-        const model = await getConnectedModel(this, i);
-        const tools = await getConnectedTools(this, i);
-        const memory = await getConnectedMemory(this, i);
+        const [model, tools, memory] = await Promise.all([
+          getConnectedModel(this, i),
+          getConnectedTools(this, i),
+          getConnectedMemory(this, i),
+        ]);
 
-        // 3. Load chat history from memory
         const memoryAdapter = memory ? new ChatArrayMemory(memory) : null;
         const chatHistory = memoryAdapter ? await memoryAdapter.load() : [];
 
-        // 4. Build messages
         const messages = [
           ...chatHistory,
           { role: 'user' as const, content: userPrompt },
         ];
 
-        // 5. Set thread title if enabled
         if (options.setThreadTitle) {
           const maxLen = options.maxTitleLength ?? 50;
           const title =
             userPrompt.length > maxLen
               ? userPrompt.substring(0, maxLen) + '...'
               : userPrompt;
-          await streamManager.setTitle(title);
+          // Fire-and-forget — non-critical, don't block agent execution
+          void streamManager.setTitle(title);
         }
 
-        // 6. Execute agent with streaming
         const result = await executeAgent({
           model,
           tools,
@@ -320,10 +315,8 @@ export class SlackAiStreamingAgent implements INodeType {
           streamManager,
         });
 
-        // 7. Stop the stream
         await streamManager.stop();
 
-        // 8. Save to memory
         if (memoryAdapter) {
           await memoryAdapter.save([
             { role: 'user', content: userPrompt },
@@ -331,7 +324,6 @@ export class SlackAiStreamingAgent implements INodeType {
           ]);
         }
 
-        // 9. Build output
         const durationMs = Date.now() - startTime;
         returnData.push({
           json: {

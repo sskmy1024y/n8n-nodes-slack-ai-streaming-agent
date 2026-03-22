@@ -1,4 +1,4 @@
-export { getConnectedModel, extractModelSettings } from './getConnectedModel';
+export { getConnectedModel } from './getConnectedModel';
 export { getConnectedTools } from './getConnectedTools';
 export { getConnectedMemory } from './getConnectedMemory';
 export type { N8nMemory } from './getConnectedMemory';
