@@ -107,9 +107,10 @@ export class SlackStreamManager {
   }
 
   async appendText(delta: string): Promise<void> {
-    if (this.isStopped || this.useFallback) return;
-
+    // Always accumulate text regardless of streaming state
     this.fullText += delta;
+
+    if (this.isStopped || this.useFallback) return;
 
     if (!this.streamTs) {
       await this.startStream(delta);
