@@ -24,7 +24,9 @@
       "bot": [
         "assistant:write",
         "chat:write",
-        "im:history"
+        "im:history",
+        "channels:history",
+        "app_mentions:read"
       ]
     }
   },
@@ -34,7 +36,9 @@
       "bot_events": [
         "assistant_thread_started",
         "assistant_thread_context_changed",
-        "message.im"
+        "message.im",
+        "message.channels",
+        "app_mention"
       ]
     },
     "interactivity": {

@@ -3,6 +3,8 @@ import type { LanguageModelV1, CoreMessage, ToolSet } from 'ai';
 import type { SlackStreamManager } from './slack-stream';
 import type { IntermediateStep } from './types';
 
+const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes
+
 export interface AgentExecutorOptions {
   model: LanguageModelV1;
   tools: ToolSet;
@@ -10,6 +12,7 @@ export interface AgentExecutorOptions {
   messages: CoreMessage[];
   maxSteps: number;
   streamManager: SlackStreamManager;
+  timeoutMs?: number;
 }
 
 export interface AgentExecutorResult {
@@ -17,6 +20,22 @@ export interface AgentExecutorResult {
   intermediateSteps: IntermediateStep[];
   tokenCount?: number;
   newMessages: CoreMessage[];
+}
+
+/**
+ * Wraps a promise with a timeout.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`[SlackAiStreamingAgent] Timeout after ${ms}ms: ${label}`)),
+      ms,
+    );
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
 }
 
 /**
@@ -32,54 +51,84 @@ export async function executeAgent(
     messages,
     maxSteps,
     streamManager,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
   } = options;
 
   const intermediateSteps: IntermediateStep[] = [];
 
-  const result = streamText({
-    model,
-    ...(systemPrompt ? { system: systemPrompt } : {}),
-    messages,
-    tools: Object.keys(tools).length > 0 ? tools : undefined,
-    maxSteps,
-    onStepFinish: async (step: Record<string, unknown>) => {
-      // Report completed tool calls as task_update chunks
-      const toolCalls = step['toolCalls'] as
-        | Array<{ toolCallId: string; toolName: string; args: unknown }>
-        | undefined;
-      const toolResults = step['toolResults'] as
-        | Array<{ toolCallId: string; toolName: string; result: unknown }>
-        | undefined;
+  console.log('[SlackAiStreamingAgent] Starting streamText...');
+  console.log('[SlackAiStreamingAgent] Messages:', JSON.stringify(messages.map((m) => ({
+    role: m.role,
+    content: typeof m.content === 'string' ? m.content.slice(0, 100) : '(complex)',
+  }))));
 
-      if (toolCalls && toolCalls.length > 0) {
-        for (const tc of toolCalls) {
-          const toolResult = toolResults?.find(
-            (tr) => tr.toolCallId === tc.toolCallId,
-          );
+  let result;
+  try {
+    result = streamText({
+      model,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages,
+      tools: Object.keys(tools).length > 0 ? tools : undefined,
+      maxSteps,
+      onStepFinish: async (step: Record<string, unknown>) => {
+        console.log('[SlackAiStreamingAgent] Step finished');
+        const toolCalls = step['toolCalls'] as
+          | Array<{ toolCallId: string; toolName: string; args: unknown }>
+          | undefined;
+        const toolResults = step['toolResults'] as
+          | Array<{ toolCallId: string; toolName: string; result: unknown }>
+          | undefined;
 
-          intermediateSteps.push({
-            toolName: tc.toolName,
-            toolCallId: tc.toolCallId,
-            args: tc.args as Record<string, unknown>,
-            result: toolResult?.result,
-          });
+        if (toolCalls && toolCalls.length > 0) {
+          for (const tc of toolCalls) {
+            const toolResult = toolResults?.find(
+              (tr) => tr.toolCallId === tc.toolCallId,
+            );
 
-          await streamManager.sendTaskUpdate(
-            tc.toolCallId,
-            tc.toolName,
-            'complete',
-          );
+            intermediateSteps.push({
+              toolName: tc.toolName,
+              toolCallId: tc.toolCallId,
+              args: tc.args as Record<string, unknown>,
+              result: toolResult?.result,
+            });
+
+            await streamManager.sendTaskUpdate(
+              tc.toolCallId,
+              tc.toolName,
+              'complete',
+            );
+          }
         }
-      }
-    },
-  });
-
-  // Relay text stream to Slack
-  let fullResponse = '';
-  for await (const delta of result.textStream) {
-    fullResponse += delta;
-    await streamManager.appendText(delta);
+      },
+    });
+  } catch (error) {
+    console.error('[SlackAiStreamingAgent] streamText() call failed:', error);
+    throw new Error(`Failed to start AI streaming: ${error instanceof Error ? error.message : String(error)}`);
   }
+
+  // Relay text stream to Slack with timeout
+  console.log('[SlackAiStreamingAgent] Consuming text stream...');
+  let fullResponse = '';
+  let receivedFirstChunk = false;
+
+  const streamConsumption = (async () => {
+    try {
+      for await (const delta of result.textStream) {
+        if (!receivedFirstChunk) {
+          console.log('[SlackAiStreamingAgent] First chunk received');
+          receivedFirstChunk = true;
+        }
+        fullResponse += delta;
+        await streamManager.appendText(delta);
+      }
+      console.log(`[SlackAiStreamingAgent] Stream complete. Total length: ${fullResponse.length}`);
+    } catch (error) {
+      console.error('[SlackAiStreamingAgent] Error consuming stream:', error);
+      throw new Error(`AI stream error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  })();
+
+  await withTimeout(streamConsumption, timeoutMs, 'consuming text stream');
 
   // Wait for completion to get usage data
   const finalResult = await result;
@@ -100,7 +149,6 @@ export async function executeAgent(
       | undefined;
 
     if (toolCalls && toolCalls.length > 0) {
-      // Assistant message with tool calls
       newMessages.push({
         role: 'assistant',
         content: toolCalls.map((tc) => ({
@@ -111,7 +159,6 @@ export async function executeAgent(
         })),
       });
 
-      // Tool result messages
       if (toolResults) {
         for (const tr of toolResults) {
           newMessages.push({
@@ -130,7 +177,6 @@ export async function executeAgent(
     }
   }
 
-  // Final assistant text
   if (fullResponse) {
     newMessages.push({
       role: 'assistant',

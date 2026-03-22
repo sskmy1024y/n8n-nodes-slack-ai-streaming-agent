@@ -9,7 +9,7 @@
         "options": {}
       },
       "id": "a1b2c3d4-1111-4000-8000-000000000001",
-      "name": "Webhook Trigger",
+      "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [0, 300],
@@ -27,7 +27,9 @@
       "name": "Respond 200",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [220, 300]
+      "position": [220, 300],
+      "notesInFlow": true,
+      "notes": "Slack に即座に 200 を返す（3秒制限対策）。\nワークフローはこの後も継続実行される。"
     },
     {
       "parameters": {
@@ -39,7 +41,7 @@
                 "combinator": "and",
                 "conditions": [
                   {
-                    "leftValue": "={{ $json.body.type }}",
+                    "leftValue": "={{ $('Webhook').item.json.body.type }}",
                     "rightValue": "url_verification",
                     "operator": { "type": "string", "operation": "equals" }
                   }
@@ -53,7 +55,7 @@
                 "combinator": "and",
                 "conditions": [
                   {
-                    "leftValue": "={{ $json.body.event?.type }}",
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
                     "rightValue": "assistant_thread_started",
                     "operator": { "type": "string", "operation": "equals" }
                   }
@@ -67,18 +69,32 @@
                 "combinator": "and",
                 "conditions": [
                   {
-                    "leftValue": "={{ $json.body.event?.type }}",
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
+                    "rightValue": "app_mention",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              },
+              "renameOutput": "App Mention"
+            },
+            {
+              "conditions": {
+                "options": { "version": 2 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
                     "rightValue": "message",
                     "operator": { "type": "string", "operation": "equals" }
                   },
                   {
-                    "leftValue": "={{ $json.body.event?.bot_id }}",
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.bot_id }}",
                     "rightValue": "",
                     "operator": { "type": "string", "operation": "empty" }
                   }
                 ]
               },
-              "renameOutput": "User Message"
+              "renameOutput": "User Message (DM)"
             }
           ]
         },
@@ -90,7 +106,7 @@
       "name": "Route by Event",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
-      "position": [440, 300]
+      "position": [460, 300]
     },
     {
       "parameters": {
@@ -109,14 +125,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  channel_id: $json.body.event.assistant_thread.channel_id,\n  thread_ts: $json.body.event.assistant_thread.thread_ts,\n  prompts: [\n    { title: \"Summarize\", message: \"Summarize the key points of this conversation.\" },\n    { title: \"Help me write\", message: \"Help me draft a message about...\" },\n    { title: \"What can you do?\", message: \"What kinds of tasks can you help me with?\" }\n  ]\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  channel_id: $('Webhook').item.json.body.event.assistant_thread.channel_id,\n  thread_ts: $('Webhook').item.json.body.event.assistant_thread.thread_ts,\n  prompts: [\n    { title: \"Summarize\", message: \"Summarize the key points of this conversation.\" },\n    { title: \"Help me write\", message: \"Help me draft a message about...\" },\n    { title: \"What can you do?\", message: \"What kinds of tasks can you help me with?\" }\n  ]\n}) }}",
         "options": {}
       },
       "id": "a1b2c3d4-4444-4000-8000-000000000004",
       "name": "Set Suggested Prompts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [700, 200]
+      "position": [720, 200]
     },
     {
       "parameters": {
@@ -125,31 +141,37 @@
             {
               "id": "a1b2c3d4-aaaa-4000-8000-00000000000a",
               "name": "channel",
-              "value": "={{ $json.body.event.channel }}",
+              "value": "={{ $('Webhook').item.json.body.event.channel }}",
               "type": "string"
             },
             {
               "id": "a1b2c3d4-bbbb-4000-8000-00000000000b",
               "name": "thread_ts",
-              "value": "={{ $json.body.event.thread_ts ?? $json.body.event.ts }}",
+              "value": "={{ $('Webhook').item.json.body.event.thread_ts ?? $('Webhook').item.json.body.event.ts }}",
               "type": "string"
             },
             {
               "id": "a1b2c3d4-cccc-4000-8000-00000000000c",
               "name": "user_id",
-              "value": "={{ $json.body.event.user }}",
+              "value": "={{ $('Webhook').item.json.body.event.user }}",
               "type": "string"
             },
             {
               "id": "a1b2c3d4-dddd-4000-8000-00000000000d",
               "name": "team_id",
-              "value": "={{ $json.body.team_id }}",
+              "value": "={{ $('Webhook').item.json.body.team_id }}",
               "type": "string"
             },
             {
               "id": "a1b2c3d4-eeee-4000-8000-00000000000e",
               "name": "chatInput",
-              "value": "={{ $json.body.event.text }}",
+              "value": "={{ ($('Webhook').item.json.body.event.text ?? '').replace(/<@[A-Z0-9]+>/g, '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-ffff-4000-8000-00000000000f",
+              "name": "sessionId",
+              "value": "={{ $('Webhook').item.json.body.event.channel }}_{{ $('Webhook').item.json.body.event.thread_ts ?? $('Webhook').item.json.body.event.ts }}",
               "type": "string"
             }
           ]
@@ -160,7 +182,7 @@
       "name": "Extract Event Data",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [700, 400]
+      "position": [720, 400]
     },
     {
       "parameters": {
@@ -181,7 +203,7 @@
       "name": "Slack AI Streaming Agent",
       "type": "n8n-nodes-slack-ai-streaming-agent.slackAiStreamingAgent",
       "typeVersion": 1,
-      "position": [960, 400]
+      "position": [980, 400]
     },
     {
       "parameters": {},
@@ -189,7 +211,7 @@
       "name": "OpenAI Chat Model",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1,
-      "position": [880, 620]
+      "position": [900, 620]
     },
     {
       "parameters": {
@@ -199,11 +221,11 @@
       "name": "Window Buffer Memory",
       "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
       "typeVersion": 1.3,
-      "position": [1060, 620]
+      "position": [1080, 620]
     }
   ],
   "connections": {
-    "Webhook Trigger": {
+    "Webhook": {
       "main": [
         [
           { "node": "Respond 200", "type": "main", "index": 0 }
@@ -222,6 +244,9 @@
         [],
         [
           { "node": "Set Suggested Prompts", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Extract Event Data", "type": "main", "index": 0 }
         ],
         [
           { "node": "Extract Event Data", "type": "main", "index": 0 }

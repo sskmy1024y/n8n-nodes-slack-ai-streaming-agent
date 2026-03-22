@@ -21,21 +21,61 @@ function readModelSetting(model: Record<string, unknown>, ...keys: string[]): un
 }
 
 /**
+ * Recursively search for an API key in the model object.
+ */
+function deepSearchApiKey(obj: unknown, depth = 0): string | null {
+  if (depth > 3 || !obj || typeof obj !== 'object') return null;
+  const record = obj as Record<string, unknown>;
+
+  // Check common key names
+  const keyNames = [
+    'apiKey', 'openAIApiKey', 'anthropicApiKey', 'googleApiKey',
+    'api_key', 'key', 'accessToken',
+  ];
+  for (const name of keyNames) {
+    const val = record[name];
+    if (typeof val === 'string' && val.length > 8) return val;
+  }
+
+  // Search nested objects
+  const nestedKeys = [
+    'clientConfig', 'client', 'configuration', 'config',
+    'credentials', 'params', 'kwargs', 'lc_kwargs',
+  ];
+  for (const name of nestedKeys) {
+    const nested = record[name];
+    if (nested && typeof nested === 'object') {
+      const found = deepSearchApiKey(nested, depth + 1);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Extract API key from a LangChain model object.
  */
 function extractApiKey(model: Record<string, unknown>): string {
-  const candidates = [
-    model['apiKey'],
-    model['openAIApiKey'],
-    model['anthropicApiKey'],
-    model['googleApiKey'],
-    (model['clientConfig'] as Record<string, unknown>)?.['apiKey'],
-    (model['client'] as Record<string, unknown>)?.['apiKey'],
-  ];
-  for (const key of candidates) {
-    if (typeof key === 'string' && key.length > 0) return key;
-  }
-  throw new Error('Could not extract API key from connected model node');
+  const key = deepSearchApiKey(model);
+  if (key) return key;
+
+  // Log available keys for debugging
+  const allKeys = Object.keys(model);
+  console.error(
+    '[SlackAiStreamingAgent] Could not find API key. Model object keys:',
+    allKeys.join(', '),
+  );
+  console.error(
+    '[SlackAiStreamingAgent] Constructor:',
+    model.constructor?.name ?? 'unknown',
+  );
+
+  throw new Error(
+    `Could not extract API key from connected model node. ` +
+    `Model constructor: ${model.constructor?.name ?? 'unknown'}, ` +
+    `Available keys: ${allKeys.slice(0, 15).join(', ')}`,
+  );
 }
 
 /**
@@ -46,10 +86,15 @@ function extractModelName(model: Record<string, unknown>): string {
     model['modelName'],
     model['model'],
     model['modelId'],
+    (model['kwargs'] as Record<string, unknown>)?.['modelName'],
+    (model['kwargs'] as Record<string, unknown>)?.['model'],
+    (model['lc_kwargs'] as Record<string, unknown>)?.['modelName'],
+    (model['lc_kwargs'] as Record<string, unknown>)?.['model'],
   ];
   for (const name of candidates) {
     if (typeof name === 'string' && name.length > 0) return name;
   }
+  console.warn('[SlackAiStreamingAgent] Could not detect model name, defaulting to gpt-4o');
   return 'gpt-4o';
 }
 
@@ -65,11 +110,17 @@ function convertN8nModelToAiSdk(langchainModel: unknown): LanguageModelV1 {
     | string
     | undefined;
 
+  console.log(
+    `[SlackAiStreamingAgent] Model conversion: constructor=${constructorName}, ` +
+    `model=${modelName}, apiKey=${apiKey.slice(0, 8)}..., baseURL=${baseURL ?? 'default'}`,
+  );
+
   // Detect provider
   if (
     constructorName.includes('anthropic') ||
     apiKey.startsWith('sk-ant-')
   ) {
+    console.log('[SlackAiStreamingAgent] Using Anthropic provider');
     const provider = createAnthropic({ apiKey });
     return provider(modelName);
   }
@@ -78,11 +129,13 @@ function convertN8nModelToAiSdk(langchainModel: unknown): LanguageModelV1 {
     constructorName.includes('google') ||
     constructorName.includes('gemini')
   ) {
+    console.log('[SlackAiStreamingAgent] Using Google provider');
     const provider = createGoogleGenerativeAI({ apiKey });
     return provider(modelName);
   }
 
   // Default: OpenAI-compatible (including OpenRouter)
+  console.log('[SlackAiStreamingAgent] Using OpenAI provider');
   const provider = createOpenAI({
     apiKey,
     ...(baseURL ? { baseURL } : {}),
@@ -104,6 +157,12 @@ export async function getConnectedModel(
   if (!model) {
     throw new Error('No AI model connected. Please connect a language model sub-node.');
   }
+
+  console.log(
+    '[SlackAiStreamingAgent] Raw model type:',
+    (model as Record<string, unknown>).constructor?.name,
+  );
+
   return convertN8nModelToAiSdk(model);
 }
 
