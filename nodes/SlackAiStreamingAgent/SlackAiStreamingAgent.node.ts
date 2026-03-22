@@ -274,8 +274,7 @@ export class SlackAiStreamingAgent implements INodeType {
         threadTs,
         recipientUserId: userId,
         recipientTeamId: teamId,
-        taskDisplayMode: options.taskDisplayMode ?? 'timeline',
-        throttleMs: options.appendThrottleMs ?? 100,
+        bufferSize: options.appendThrottleMs ?? 64,
         enableFeedback: options.feedbackButtons ?? false,
       });
 
