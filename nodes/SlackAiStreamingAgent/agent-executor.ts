@@ -89,9 +89,9 @@ export async function executeAgent(
     },
   });
 
-  // Relay text stream to Slack — streamManager.responseText accumulates the full text
+  // Relay text stream to Slack — appendText is non-blocking, sends happen in background
   for await (const delta of result.textStream) {
-    await streamManager.appendText(delta);
+    streamManager.appendText(delta);
   }
 
   const finalResult = await result;

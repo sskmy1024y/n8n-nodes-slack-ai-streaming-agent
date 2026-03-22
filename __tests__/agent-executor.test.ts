@@ -27,7 +27,7 @@ function createMockStreamManager(): SlackStreamManager & {
     appendedTexts,
     taskUpdates,
     get responseText() { return fullText; },
-    appendText: jest.fn(async (text: string) => {
+    appendText: jest.fn((text: string) => {
       appendedTexts.push(text);
       fullText += text;
     }),

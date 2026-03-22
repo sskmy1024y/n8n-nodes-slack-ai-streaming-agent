@@ -1,39 +1,85 @@
 import type { WebClient } from '@slack/web-api';
 import type { StreamChunk, TaskDisplayMode, FeedbackBlock } from './types';
 
-class SlackStreamThrottler {
-  private buffer = '';
-  private lastSendTime = 0;
-  private minInterval: number;
+/**
+ * Non-blocking stream loop inspired by OpenClaw's draft-stream-loop.
+ * Accumulates text and sends it to Slack at throttled intervals.
+ * The `update()` call returns immediately — sends happen in the background.
+ */
+class StreamLoop {
+  private pendingText = '';
+  private inFlightPromise: Promise<void> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private throttleMs: number;
+  private sendFn: (text: string) => Promise<void>;
+  private stopped = false;
 
-  constructor(minIntervalMs = 100) {
-    this.minInterval = minIntervalMs;
+  constructor(throttleMs: number, sendFn: (text: string) => Promise<void>) {
+    this.throttleMs = throttleMs;
+    this.sendFn = sendFn;
   }
 
-  async append(text: string, sendFn: (text: string) => Promise<void>): Promise<void> {
-    this.buffer += text;
-    const now = Date.now();
-    if (now - this.lastSendTime >= this.minInterval && this.buffer.length > 0) {
-      const chunk = this.buffer;
-      this.buffer = '';
-      this.lastSendTime = now;
-      await sendFn(chunk);
+  update(text: string): void {
+    this.pendingText += text;
+    this.scheduleFlush();
+  }
+
+  async flush(): Promise<void> {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    // Wait for any in-flight send to complete
+    if (this.inFlightPromise) {
+      await this.inFlightPromise;
+    }
+    await this.drainPending();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
     }
   }
 
-  async flush(sendFn: (text: string) => Promise<void>): Promise<void> {
-    if (this.buffer.length > 0) {
-      const chunk = this.buffer;
-      this.buffer = '';
-      this.lastSendTime = Date.now();
-      await sendFn(chunk);
-    }
-  }
-
+  /** Return any unsent text without sending it */
   drain(): string {
-    const remaining = this.buffer;
-    this.buffer = '';
-    return remaining;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    const text = this.pendingText;
+    this.pendingText = '';
+    return text;
+  }
+
+  private scheduleFlush(): void {
+    if (this.stopped || this.timer) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.drainPending();
+    }, this.throttleMs);
+  }
+
+  private async drainPending(): Promise<void> {
+    if (this.pendingText.length === 0) return;
+
+    // Wait for previous send to complete (serialize sends)
+    if (this.inFlightPromise) {
+      await this.inFlightPromise;
+    }
+
+    const text = this.pendingText;
+    this.pendingText = '';
+
+    this.inFlightPromise = this.sendFn(text);
+    try {
+      await this.inFlightPromise;
+    } finally {
+      this.inFlightPromise = null;
+    }
   }
 }
 
@@ -55,9 +101,10 @@ export class SlackStreamManager {
   private recipientUserId: string;
   private recipientTeamId: string;
   private taskDisplayMode: TaskDisplayMode;
-  private throttler: SlackStreamThrottler;
+  private throttleMs: number;
   private enableFeedback: boolean;
 
+  private streamLoop: StreamLoop | null = null;
   private streamTs: string | null = null;
   private fullText = '';
   private isStopped = false;
@@ -70,7 +117,7 @@ export class SlackStreamManager {
     this.recipientUserId = options.recipientUserId;
     this.recipientTeamId = options.recipientTeamId;
     this.taskDisplayMode = options.taskDisplayMode ?? 'timeline';
-    this.throttler = new SlackStreamThrottler(options.throttleMs ?? 100);
+    this.throttleMs = options.throttleMs ?? 100;
     this.enableFeedback = options.enableFeedback ?? false;
   }
 
@@ -106,20 +153,26 @@ export class SlackStreamManager {
     }
   }
 
-  async appendText(delta: string): Promise<void> {
-    // Always accumulate text regardless of streaming state
+  /**
+   * Append a text delta. Returns immediately — Slack sends happen in the background.
+   */
+  appendText(delta: string): void {
     this.fullText += delta;
 
     if (this.isStopped || this.useFallback) return;
 
     if (!this.streamTs) {
-      await this.startStream(delta);
+      // First chunk — start the stream synchronously-ish
+      void this.startStream(delta);
       return;
     }
 
-    await this.throttler.append(delta, (text) =>
-      this.sendAppendStream([{ type: 'markdown_text', markdown_text: text }]),
-    );
+    if (!this.streamLoop) {
+      this.streamLoop = new StreamLoop(this.throttleMs, (text) =>
+        this.sendAppendStream([{ type: 'markdown_text', markdown_text: text }]),
+      );
+    }
+    this.streamLoop.update(delta);
   }
 
   async sendTaskUpdate(
@@ -131,9 +184,9 @@ export class SlackStreamManager {
     if (!this.streamTs || this.isStopped || this.useFallback) return;
 
     // Flush pending text first to maintain ordering
-    await this.throttler.flush((text) =>
-      this.sendAppendStream([{ type: 'markdown_text', markdown_text: text }]),
-    );
+    if (this.streamLoop) {
+      await this.streamLoop.flush();
+    }
 
     if (this.useFallback) return;
 
@@ -154,19 +207,24 @@ export class SlackStreamManager {
     this.isStopped = true;
 
     if (!this.streamTs || this.useFallback) {
+      if (this.streamLoop) this.streamLoop.stop();
       await this.postFallbackMessage();
       return;
     }
 
-    // Flush remaining buffer via appendStream, then wait briefly before stopping.
-    // stopStream's chunks param is unreliable for final text delivery.
-    const remaining = this.throttler.drain();
-    if (remaining.length > 0) {
-      await this.sendAppendStream([{ type: 'markdown_text', markdown_text: remaining }]);
+    // Flush any remaining buffered text via the stream loop
+    if (this.streamLoop) {
+      await this.streamLoop.flush();
+      this.streamLoop.stop();
     }
 
-    // Small delay to ensure Slack processes the last appendStream before stopping
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    if (this.useFallback) {
+      await this.postFallbackMessage();
+      return;
+    }
+
+    // Brief delay to ensure Slack processes the last appendStream
+    await new Promise((resolve) => setTimeout(resolve, 150));
 
     try {
       const blocks = this.enableFeedback ? this.buildFeedbackBlocks() : undefined;
@@ -211,6 +269,10 @@ export class SlackStreamManager {
       const result = response as { ok: boolean; ts?: string; error?: string };
       if (result.ok && result.ts) {
         this.streamTs = result.ts;
+        // Initialize the stream loop now that we have a stream TS
+        this.streamLoop = new StreamLoop(this.throttleMs, (text) =>
+          this.sendAppendStream([{ type: 'markdown_text', markdown_text: text }]),
+        );
       } else {
         this.useFallback = true;
       }
