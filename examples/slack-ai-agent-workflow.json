@@ -3,16 +3,59 @@
   "nodes": [
     {
       "parameters": {
+        "contextWindowLength": 20
+      },
+      "id": "95d40761-c1c6-4e60-b673-f43301ac6db7",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [672, 1696],
+      "notesInFlow": true,
+      "notes": "In-memory only. Conversation history is lost on n8n restart.\nFor persistence, replace with Postgres Chat Memory or Redis Chat Memory."
+    },
+    {
+      "parameters": {
+        "channelId": "={{ $json.channel }}",
+        "threadTs": "={{ $json.thread_ts }}",
+        "recipientUserId": "={{ $json.user_id }}",
+        "recipientTeamId": "={{ $json.team_id }}",
+        "systemPrompt": "You are a helpful AI assistant. Answer questions clearly and concisely.",
+        "options": {}
+      },
+      "type": "CUSTOM.slackAiStreamingAgent",
+      "typeVersion": 1,
+      "position": [528, 1488],
+      "id": "8a4323e7-31ec-4905-a0b5-d01d9664cd16",
+      "name": "Slack AI Streaming Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [528, 1696],
+      "id": "97d42db4-f4a1-4be9-b05a-2d5e0175cfbe",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
         "httpMethod": "POST",
         "path": "slack-events",
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "a1b2c3d4-1111-4000-8000-000000000001",
+      "id": "f71a4e79-2da8-4533-bc88-76efa702b5a2",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 300],
+      "position": [-304, 1424],
       "webhookId": "a1b2c3d4-0000-4000-8000-000000000000"
     },
     {
@@ -23,100 +66,13 @@
           "responseCode": 200
         }
       },
-      "id": "a1b2c3d4-2222-4000-8000-000000000002",
+      "id": "905a6489-f865-47d0-959e-9165336f9923",
       "name": "Respond 200",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [220, 300],
+      "position": [-112, 1424],
       "notesInFlow": true,
-      "notes": "Slack に即座に 200 を返す（3秒制限対策）。\nワークフローはこの後も継続実行される。"
-    },
-    {
-      "parameters": {
-        "rules": {
-          "values": [
-            {
-              "conditions": {
-                "options": { "version": 2 },
-                "combinator": "and",
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Webhook').item.json.body.type }}",
-                    "rightValue": "url_verification",
-                    "operator": { "type": "string", "operation": "equals" }
-                  }
-                ]
-              },
-              "renameOutput": "URL Verification"
-            },
-            {
-              "conditions": {
-                "options": { "version": 2 },
-                "combinator": "and",
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
-                    "rightValue": "assistant_thread_started",
-                    "operator": { "type": "string", "operation": "equals" }
-                  }
-                ]
-              },
-              "renameOutput": "Thread Started"
-            },
-            {
-              "conditions": {
-                "options": { "version": 2 },
-                "combinator": "and",
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
-                    "rightValue": "app_mention",
-                    "operator": { "type": "string", "operation": "equals" }
-                  },
-                  {
-                    "leftValue": "={{ $('Webhook').item.json.body.event?.subtype }}",
-                    "rightValue": "",
-                    "operator": { "type": "string", "operation": "empty" }
-                  }
-                ]
-              },
-              "renameOutput": "App Mention"
-            },
-            {
-              "conditions": {
-                "options": { "version": 2 },
-                "combinator": "and",
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
-                    "rightValue": "message",
-                    "operator": { "type": "string", "operation": "equals" }
-                  },
-                  {
-                    "leftValue": "={{ $('Webhook').item.json.body.event?.subtype }}",
-                    "rightValue": "",
-                    "operator": { "type": "string", "operation": "empty" }
-                  },
-                  {
-                    "leftValue": "={{ $('Webhook').item.json.body.event?.bot_id }}",
-                    "rightValue": "",
-                    "operator": { "type": "string", "operation": "empty" }
-                  }
-                ]
-              },
-              "renameOutput": "User Message (DM)"
-            }
-          ]
-        },
-        "options": {
-          "fallbackOutput": "none"
-        }
-      },
-      "id": "a1b2c3d4-3333-4000-8000-000000000003",
-      "name": "Route by Event",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
-      "position": [460, 300]
+      "notes": "Immediately returns 200 to Slack (3-second timeout).\nWorkflow continues executing after this node."
     },
     {
       "parameters": {
@@ -138,11 +94,11 @@
         "jsonBody": "={{ JSON.stringify({\n  channel_id: $('Webhook').item.json.body.event.assistant_thread.channel_id,\n  thread_ts: $('Webhook').item.json.body.event.assistant_thread.thread_ts,\n  prompts: [\n    { title: \"Summarize\", message: \"Summarize the key points of this conversation.\" },\n    { title: \"Help me write\", message: \"Help me draft a message about...\" },\n    { title: \"What can you do?\", message: \"What kinds of tasks can you help me with?\" }\n  ]\n}) }}",
         "options": {}
       },
-      "id": "a1b2c3d4-4444-4000-8000-000000000004",
+      "id": "e1287aca-0201-4feb-8c51-f1f11feb9b28",
       "name": "Set Suggested Prompts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, 200]
+      "position": [336, 1280]
     },
     {
       "parameters": {
@@ -179,7 +135,7 @@
               "type": "string"
             },
             {
-              "id": "a1b2c3d4-ffff-4000-8000-00000000000f",
+              "id": "49d21ddb-ce24-491c-88de-2c195d25fecb",
               "name": "sessionId",
               "value": "={{ $('Webhook').item.json.body.event.channel }}_{{ $('Webhook').item.json.body.event.thread_ts ?? $('Webhook').item.json.body.event.ts }}",
               "type": "string"
@@ -188,66 +144,198 @@
         },
         "options": {}
       },
-      "id": "a1b2c3d4-5555-4000-8000-000000000005",
+      "id": "ee1ec408-bc24-4578-92ed-d7639699a6d7",
       "name": "Extract Event Data",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [720, 400]
+      "position": [336, 1488]
     },
     {
       "parameters": {
-        "channelId": "={{ $json.channel }}",
-        "threadTs": "={{ $json.thread_ts }}",
-        "recipientUserId": "={{ $json.user_id }}",
-        "recipientTeamId": "={{ $json.team_id }}",
-        "promptSource": "takePreviousNode",
-        "systemPrompt": "You are a helpful AI assistant. Answer questions clearly and concisely.",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.type }}",
+                    "rightValue": "url_verification",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "8f9a33fb-afa1-41d4-b21c-0fb929d15253"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
+                    "rightValue": "assistant_thread_started",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "d53c692a-9398-4002-81ea-705e2a7b8317"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
+                    "rightValue": "app_mention",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "91136a0f-be04-49a3-905c-a8e66291f4c8"
+                  },
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.subtype }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "empty"
+                    },
+                    "id": "928bc62e-9a52-4cdc-8a62-0d2ce44e94d1"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
+                    "rightValue": "message",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "0b113971-e629-4cd3-8f1c-ad500b1e48a0"
+                  },
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.subtype }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "empty"
+                    },
+                    "id": "6674d713-560c-4466-98ea-09b6f519193e"
+                  },
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.bot_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "empty"
+                    },
+                    "id": "65fce555-f4f0-4c88-8647-6e12c1ddd496"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
         "options": {
-          "taskDisplayMode": "timeline",
-          "maxIterations": 10,
-          "feedbackButtons": true,
-          "setThreadTitle": true
+          "fallbackOutput": "none"
         }
       },
-      "id": "a1b2c3d4-6666-4000-8000-000000000006",
-      "name": "Slack AI Streaming Agent",
-      "type": "n8n-nodes-slack-ai-streaming-agent.slackAiStreamingAgent",
-      "typeVersion": 1,
-      "position": [980, 400]
-    },
-    {
-      "parameters": {},
-      "id": "a1b2c3d4-7777-4000-8000-000000000007",
-      "name": "OpenAI Chat Model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1,
-      "position": [900, 620]
-    },
-    {
-      "parameters": {
-        "contextWindowLength": 20
-      },
-      "id": "a1b2c3d4-8888-4000-8000-000000000008",
-      "name": "Window Buffer Memory",
-      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
-      "typeVersion": 1.3,
-      "position": [1080, 620],
-      "notesInFlow": true,
-      "notes": "Window Buffer Memory はインメモリのみ。\nn8n 再起動で履歴が消えます。\n永続化が必要な場合は Postgres Chat Memory 等に差し替えてください。"
+      "id": "d153259e-58c0-40db-9e31-06c6d5cab660",
+      "name": "Route by Event",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [96, 1392]
     }
   ],
+  "pinData": {},
   "connections": {
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Slack AI Streaming Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Slack AI Streaming Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Webhook": {
       "main": [
         [
-          { "node": "Respond 200", "type": "main", "index": 0 }
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Respond 200": {
       "main": [
         [
-          { "node": "Route by Event", "type": "main", "index": 0 }
+          {
+            "node": "Route by Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Event Data": {
+      "main": [
+        [
+          {
+            "node": "Slack AI Streaming Agent",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -255,34 +343,25 @@
       "main": [
         [],
         [
-          { "node": "Set Suggested Prompts", "type": "main", "index": 0 }
+          {
+            "node": "Set Suggested Prompts",
+            "type": "main",
+            "index": 0
+          }
         ],
         [
-          { "node": "Extract Event Data", "type": "main", "index": 0 }
+          {
+            "node": "Extract Event Data",
+            "type": "main",
+            "index": 0
+          }
         ],
         [
-          { "node": "Extract Event Data", "type": "main", "index": 0 }
-        ]
-      ]
-    },
-    "Extract Event Data": {
-      "main": [
-        [
-          { "node": "Slack AI Streaming Agent", "type": "main", "index": 0 }
-        ]
-      ]
-    },
-    "OpenAI Chat Model": {
-      "ai_languageModel": [
-        [
-          { "node": "Slack AI Streaming Agent", "type": "ai_languageModel", "index": 0 }
-        ]
-      ]
-    },
-    "Window Buffer Memory": {
-      "ai_memory": [
-        [
-          { "node": "Slack AI Streaming Agent", "type": "ai_memory", "index": 0 }
+          {
+            "node": "Extract Event Data",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     }

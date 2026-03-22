@@ -65,11 +65,6 @@ function convertN8nModelToAiSdk(langchainModel: unknown): LanguageModelV1 {
   const baseURL = extractBaseURL(model);
   const provider = detectProvider(constructorName);
 
-  console.log(
-    `[SlackAiStreamingAgent] Model: constructor=${constructorName}, provider=${provider}, ` +
-    `model=${modelName}, apiKey=${apiKey.slice(0, 8)}..., baseURL=${baseURL ?? '(default)'}`,
-  );
-
   switch (provider) {
     case 'anthropic': {
       const p = createAnthropic({ apiKey, ...(baseURL ? { baseURL } : {}) });

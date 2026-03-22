@@ -1,8 +1,4 @@
 {
-  "_metadata": {
-    "major_version": 2,
-    "minor_version": 1
-  },
   "display_information": {
     "name": "My AI Agent",
     "description": "AI-powered assistant with streaming responses",
@@ -10,23 +6,28 @@
     "long_description": "AI agent built with n8n using native Slack streaming API. See answers as they are generated token by token in real time — no edited label, no waiting. Supports tool calling and memory."
   },
   "features": {
+    "app_home": {
+      "home_tab_enabled": false,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
     "bot_user": {
       "display_name": "My AI Agent",
       "always_online": true
     },
     "assistant_view": {
       "assistant_description": "Ask me anything — I can search, calculate, and answer questions.",
-      "suggested_prompts_type": "dynamic"
+      "suggested_prompts": []
     }
   },
   "oauth_config": {
     "scopes": {
       "bot": [
+        "app_mentions:read",
         "assistant:write",
-        "chat:write",
-        "im:history",
         "channels:history",
-        "app_mentions:read"
+        "chat:write",
+        "im:history"
       ]
     }
   },
@@ -34,11 +35,11 @@
     "event_subscriptions": {
       "request_url": "https://your-n8n-domain.example.com/webhook/slack-events",
       "bot_events": [
-        "assistant_thread_started",
+        "app_mention",
         "assistant_thread_context_changed",
-        "message.im",
+        "assistant_thread_started",
         "message.channels",
-        "app_mention"
+        "message.im"
       ]
     },
     "interactivity": {
