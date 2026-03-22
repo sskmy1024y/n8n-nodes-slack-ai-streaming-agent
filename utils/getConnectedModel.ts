@@ -22,8 +22,7 @@ function deepSearch(
     if (typeof val === 'string' && val.length > 0) return val;
   }
 
-  // Search all nested objects (not just known keys)
-  for (const [key, val] of Object.entries(record)) {
+  for (const val of Object.values(record)) {
     if (val && typeof val === 'object' && !Array.isArray(val)) {
       const found = deepSearch(val, keyNames, depth + 1, maxDepth);
       if (found) return found;
@@ -34,37 +33,16 @@ function deepSearch(
 }
 
 /**
- * Dump object structure for debugging (keys + types, no values for security).
- */
-function dumpStructure(obj: unknown, depth = 0, maxDepth = 2): string {
-  if (depth > maxDepth || !obj || typeof obj !== 'object') return typeof obj;
-  const record = obj as Record<string, unknown>;
-  const entries = Object.entries(record).map(([k, v]) => {
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      return `${k}: {${dumpStructure(v, depth + 1, maxDepth)}}`;
-    }
-    if (typeof v === 'string') {
-      return `${k}: "${v.slice(0, 20)}${v.length > 20 ? '...' : ''}"`;
-    }
-    return `${k}: ${typeof v}`;
-  });
-  return entries.join(', ');
-}
-
-/**
  * Extract API key from a LangChain model object.
  */
 function extractApiKey(model: Record<string, unknown>): string {
   const key = deepSearch(model, [
     'apiKey', 'openAIApiKey', 'anthropicApiKey', 'googleApiKey',
-    'api_key', 'key', 'accessToken',
+    'api_key', 'accessToken',
   ]);
   if (key) return key;
-
-  console.error('[SlackAiStreamingAgent] Model structure:', dumpStructure(model));
   throw new Error(
-    `Could not extract API key from connected model node. ` +
-    `Constructor: ${model.constructor?.name ?? 'unknown'}`,
+    `Could not extract API key from model (${model.constructor?.name ?? 'unknown'})`,
   );
 }
 
@@ -73,9 +51,7 @@ function extractApiKey(model: Record<string, unknown>): string {
  */
 function extractModelName(model: Record<string, unknown>): string {
   const name = deepSearch(model, ['modelName', 'model', 'modelId']);
-  if (name) return name;
-  console.warn('[SlackAiStreamingAgent] Could not detect model name, defaulting to gpt-4o');
-  return 'gpt-4o';
+  return name ?? 'gpt-4o';
 }
 
 /**
@@ -83,93 +59,53 @@ function extractModelName(model: Record<string, unknown>): string {
  */
 function extractBaseURL(model: Record<string, unknown>): string | undefined {
   const url = deepSearch(model, [
-    'baseURL', 'basePath', 'base_url', 'baseUrl',
-    'apiBase', 'api_base',
+    'baseURL', 'basePath', 'base_url', 'baseUrl', 'apiBase', 'api_base',
   ]);
-  // Ignore default OpenAI URLs
-  if (url && !url.includes('api.openai.com')) return url;
-  // Still return if explicitly set even to OpenAI
-  if (url) return url;
-  return undefined;
+  return url ?? undefined;
 }
 
 /**
- * Detect the provider from constructor name, model name, API key, and base URL.
+ * Determine provider purely from the n8n node's constructor name.
+ * This reflects which node the user connected (OpenAI Chat Model, Anthropic, etc.)
  */
-function detectProvider(
-  constructorName: string,
-  modelName: string,
-  apiKey: string,
-  baseURL?: string,
-): 'anthropic' | 'google' | 'openai-compatible' {
-  const modelLower = modelName.toLowerCase();
-
-  // Anthropic detection
-  if (
-    constructorName.includes('anthropic') ||
-    apiKey.startsWith('sk-ant-') ||
-    modelLower.includes('claude')
-  ) {
-    // If there's a custom baseURL, it might be a proxy using OpenAI-compatible format
-    if (baseURL && !baseURL.includes('anthropic')) {
-      return 'openai-compatible';
-    }
-    return 'anthropic';
-  }
-
-  // Google detection
-  if (
-    constructorName.includes('google') ||
-    constructorName.includes('gemini') ||
-    modelLower.includes('gemini')
-  ) {
-    return 'google';
-  }
-
-  return 'openai-compatible';
+function detectProvider(constructorName: string): 'openai' | 'anthropic' | 'google' {
+  const name = constructorName.toLowerCase();
+  if (name.includes('anthropic')) return 'anthropic';
+  if (name.includes('google') || name.includes('gemini')) return 'google';
+  return 'openai'; // ChatOpenAI and any other OpenAI-compatible nodes
 }
 
 /**
  * Convert an n8n LangChain model sub-node to a Vercel AI SDK LanguageModelV1.
+ * Uses the node type (constructor) to select the provider, and faithfully
+ * passes through apiKey, baseURL, and model name from the credential.
  */
 function convertN8nModelToAiSdk(langchainModel: unknown): LanguageModelV1 {
   const model = langchainModel as Record<string, unknown>;
-  const constructorName = (model.constructor?.name ?? '').toLowerCase();
+  const constructorName = model.constructor?.name ?? '';
 
-  // Extract all settings from the model object
   const apiKey = extractApiKey(model);
   const modelName = extractModelName(model);
   const baseURL = extractBaseURL(model);
+  const provider = detectProvider(constructorName);
 
   console.log(
-    `[SlackAiStreamingAgent] Model conversion: constructor=${constructorName}, ` +
-    `model=${modelName}, apiKey=${apiKey.slice(0, 8)}..., baseURL=${baseURL ?? 'none'}`,
+    `[SlackAiStreamingAgent] constructor=${constructorName} → provider=${provider}, ` +
+    `model=${modelName}, baseURL=${baseURL ?? '(default)'}`,
   );
-
-  const provider = detectProvider(constructorName, modelName, apiKey, baseURL);
-  console.log(`[SlackAiStreamingAgent] Detected provider: ${provider}`);
 
   switch (provider) {
     case 'anthropic': {
-      const p = createAnthropic({
-        apiKey,
-        ...(baseURL ? { baseURL } : {}),
-      });
+      const p = createAnthropic({ apiKey, ...(baseURL ? { baseURL } : {}) });
       return p(modelName);
     }
     case 'google': {
-      const p = createGoogleGenerativeAI({
-        apiKey,
-        ...(baseURL ? { baseURL } : {}),
-      });
+      const p = createGoogleGenerativeAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
       return p(modelName);
     }
-    case 'openai-compatible':
+    case 'openai':
     default: {
-      const p = createOpenAI({
-        apiKey,
-        ...(baseURL ? { baseURL } : {}),
-      });
+      const p = createOpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
       return p(modelName);
     }
   }
@@ -189,17 +125,6 @@ export async function getConnectedModel(
   if (!model) {
     throw new Error('No AI model connected. Please connect a language model sub-node.');
   }
-
-  const record = model as Record<string, unknown>;
-  console.log(
-    '[SlackAiStreamingAgent] Raw model type:',
-    record.constructor?.name,
-  );
-  console.log(
-    '[SlackAiStreamingAgent] Model structure:',
-    dumpStructure(record),
-  );
-
   return convertN8nModelToAiSdk(model);
 }
 
