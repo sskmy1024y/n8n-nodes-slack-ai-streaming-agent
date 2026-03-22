@@ -59,20 +59,31 @@ function detectProvider(constructorName: string): 'openai' | 'anthropic' | 'goog
 
 function convertN8nModelToAiSdk(langchainModel: unknown): LanguageModelV1 {
   const model = langchainModel as Record<string, unknown>;
+  const constructorName = model.constructor?.name ?? '';
   const apiKey = extractApiKey(model);
   const modelName = extractModelName(model);
   const baseURL = extractBaseURL(model);
-  const provider = detectProvider(model.constructor?.name ?? '');
-  const opts = { apiKey, ...(baseURL ? { baseURL } : {}) };
+  const provider = detectProvider(constructorName);
+
+  console.log(
+    `[SlackAiStreamingAgent] Model: constructor=${constructorName}, provider=${provider}, ` +
+    `model=${modelName}, apiKey=${apiKey.slice(0, 8)}..., baseURL=${baseURL ?? '(default)'}`,
+  );
 
   switch (provider) {
-    case 'anthropic':
-      return createAnthropic(opts)(modelName);
-    case 'google':
-      return createGoogleGenerativeAI(opts)(modelName);
+    case 'anthropic': {
+      const p = createAnthropic({ apiKey, ...(baseURL ? { baseURL } : {}) });
+      return p(modelName);
+    }
+    case 'google': {
+      const p = createGoogleGenerativeAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
+      return p(modelName);
+    }
     case 'openai':
-    default:
-      return createOpenAI(opts)(modelName);
+    default: {
+      const p = createOpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
+      return p(modelName);
+    }
   }
 }
 

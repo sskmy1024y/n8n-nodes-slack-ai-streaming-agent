@@ -89,10 +89,14 @@ export async function executeAgent(
     },
   });
 
+  console.log('[SlackAiStreamingAgent] streamText() called, consuming textStream...');
   let chunkCount = 0;
   try {
     for await (const delta of result.textStream) {
       chunkCount++;
+      if (chunkCount === 1) {
+        console.log(`[SlackAiStreamingAgent] First chunk: "${delta.slice(0, 50)}"`);
+      }
       streamManager.appendText(delta);
     }
   } catch (err) {
