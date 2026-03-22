@@ -100,40 +100,12 @@ https://your-n8n-domain.example.com/webhook/slack-events
 - `assistant_thread_context_changed`
 - `message.im`
 
-### 3. App Manifest（参考）
+### 3. App Manifest
 
-```json
-{
-  "display_information": {
-    "name": "My AI Agent"
-  },
-  "features": {
-    "bot_user": {
-      "display_name": "My AI Agent",
-      "always_online": true
-    },
-    "assistant_view": {
-      "assistant_description": "Ask me anything",
-      "suggested_prompts": []
-    }
-  },
-  "oauth_config": {
-    "scopes": {
-      "bot": ["chat:write", "assistant:write", "im:history"]
-    }
-  },
-  "settings": {
-    "event_subscriptions": {
-      "request_url": "https://your-n8n-domain.example.com/webhook/slack-events",
-      "bot_events": [
-        "assistant_thread_started",
-        "assistant_thread_context_changed",
-        "message.im"
-      ]
-    }
-  }
-}
-```
+テンプレートの [`slack-app-manifest.json`](slack-app-manifest.json) を使用できます。
+
+1. `request_url` を実際の n8n Webhook URL に書き換え
+2. [Slack API](https://api.slack.com/apps) → **App Manifests** に貼り付け
 
 ### 4. Bot Token の取得
 
@@ -143,11 +115,19 @@ https://your-n8n-domain.example.com/webhook/slack-events
 
 ### 1. Credential の登録
 
-1. **Credentials** → **New Credential** → **Slack AI API** を選択
-2. **Bot Token** フィールドに `xoxb-...` トークンを入力
+n8n 標準の Slack credential をそのまま使用します。
+
+1. **Credentials** → **New Credential** → **Slack API** を選択
+2. **Access Token** フィールドに `xoxb-...` トークンを入力
 3. **Save** → **Test** で接続確認
 
+> 既存の Slack credential がある場合はそのまま選択できます。
+
 ### 2. ワークフローの構築
+
+テンプレートの [`examples/slack-ai-agent-workflow.json`](examples/slack-ai-agent-workflow.json) を n8n にインポートすると、以下の構成がそのまま使えます。
+
+> **インポート方法:** n8n の画面右上 **⋮** → **Import from File** → JSON ファイルを選択
 
 #### 基本構成
 

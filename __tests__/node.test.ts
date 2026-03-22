@@ -16,9 +16,9 @@ describe('SlackAiStreamingAgent node definition', () => {
     expect(desc.version).toBe(1);
   });
 
-  it('requires slackAiApi credential', () => {
+  it('requires slackApi credential', () => {
     expect(desc.credentials).toEqual([
-      { name: 'slackAiApi', required: true },
+      { name: 'slackApi', required: true },
     ]);
   });
 
@@ -111,33 +111,6 @@ describe('SlackAiStreamingAgent node definition', () => {
         const title = subOptions.find((o) => o.name === 'setThreadTitle');
         expect(title!.default).toBe(false);
       });
-    });
-  });
-});
-
-describe('SlackAiApi credential definition', () => {
-  it('exports correct credential class', async () => {
-    const { SlackAiApi } = await import('../credentials/SlackAiApi.credentials');
-    const cred = new SlackAiApi();
-
-    expect(cred.name).toBe('slackAiApi');
-    expect(cred.displayName).toBe('Slack AI API');
-    expect(cred.properties).toHaveLength(1);
-    expect(cred.properties[0].name).toBe('accessToken');
-    expect(cred.authenticate).toEqual({
-      type: 'generic',
-      properties: {
-        headers: {
-          Authorization: '=Bearer {{$credentials.accessToken}}',
-        },
-      },
-    });
-    expect(cred.test).toEqual({
-      request: {
-        baseURL: 'https://slack.com/api',
-        url: '/auth.test',
-        method: 'POST',
-      },
     });
   });
 });

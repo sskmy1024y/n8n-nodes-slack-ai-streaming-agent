@@ -53,7 +53,7 @@ export class SlackAiStreamingAgent implements INodeType {
     outputs: [NodeConnectionTypes.Main] as unknown as INodeTypeDescription['outputs'],
     credentials: [
       {
-        name: 'slackAiApi',
+        name: 'slackApi',
         required: true,
       },
     ],
@@ -231,7 +231,7 @@ export class SlackAiStreamingAgent implements INodeType {
       const startTime = Date.now();
 
       // Get credentials
-      const credentials = await this.getCredentials('slackAiApi');
+      const credentials = await this.getCredentials('slackApi');
       const slackClient = new WebClient(credentials.accessToken as string);
 
       // Get parameters

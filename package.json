@@ -21,9 +21,7 @@
   "n8n": {
     "n8nNodesApiVersion": 1,
     "strict": true,
-    "credentials": [
-      "dist/credentials/SlackAiApi.credentials.js"
-    ],
+    "credentials": [],
     "nodes": [
       "dist/nodes/SlackAiStreamingAgent/SlackAiStreamingAgent.node.js"
     ]
