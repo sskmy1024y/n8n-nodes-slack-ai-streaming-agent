@@ -85,20 +85,21 @@ export class ChatArrayMemory implements MemoryAdapter {
       if (msgType === 'human') {
         coreMessages.push({ role: 'user', content });
       } else if (msgType === 'ai') {
-        // The better-ai-agent stores CoreMessage[] as JSON in AI messages.
-        // Try to parse, fall back to plain text.
-        try {
-          const parsed = JSON.parse(content);
-          if (Array.isArray(parsed)) {
-            for (const m of parsed as CoreMessage[]) {
-              if (m.role && m.content !== undefined) {
-                coreMessages.push(m);
+        // The better-ai-agent stores CoreMessage[] as JSON in AI messages
+        if (content.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(content);
+            if (Array.isArray(parsed)) {
+              for (const m of parsed as CoreMessage[]) {
+                if (m.role && m.content !== undefined) {
+                  coreMessages.push(m);
+                }
               }
+              continue;
             }
-            continue;
+          } catch {
+            // Not valid JSON, use as plain text
           }
-        } catch {
-          // Not JSON, use as plain text
         }
         coreMessages.push({ role: 'assistant', content });
       } else if (msgType === 'system') {
@@ -108,12 +109,10 @@ export class ChatArrayMemory implements MemoryAdapter {
 
     // Apply windowing limit
     if (coreMessages.length > this.maxMessages) {
-      const trimmed = coreMessages.slice(-this.maxMessages);
+      const windowed = coreMessages.slice(-this.maxMessages);
       // Ensure we don't start with an orphaned tool result
-      while (trimmed.length > 0 && trimmed[0].role === 'tool') {
-        trimmed.shift();
-      }
-      return trimmed;
+      const firstNonTool = windowed.findIndex((m) => m.role !== 'tool');
+      return firstNonTool > 0 ? windowed.slice(firstNonTool) : windowed;
     }
 
     return coreMessages;

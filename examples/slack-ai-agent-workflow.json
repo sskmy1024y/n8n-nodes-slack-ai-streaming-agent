@@ -221,7 +221,9 @@
       "name": "Window Buffer Memory",
       "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
       "typeVersion": 1.3,
-      "position": [1080, 620]
+      "position": [1080, 620],
+      "notesInFlow": true,
+      "notes": "Window Buffer Memory はインメモリのみ。\nn8n 再起動で履歴が消えます。\n永続化が必要な場合は Postgres Chat Memory 等に差し替えてください。"
     }
   ],
   "connections": {

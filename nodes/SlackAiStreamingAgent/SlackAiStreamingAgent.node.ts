@@ -11,7 +11,7 @@ import { WebClient } from '@slack/web-api';
 import { getConnectedModel, getConnectedTools, getConnectedMemory, ChatArrayMemory } from '../../utils';
 import { SlackStreamManager } from './slack-stream';
 import { executeAgent } from './agent-executor';
-import type { PromptSource, TaskDisplayMode } from './types';
+import type { PromptSource } from './types';
 
 export class SlackAiStreamingAgent implements INodeType {
   description: INodeTypeDescription = {
@@ -58,7 +58,6 @@ export class SlackAiStreamingAgent implements INodeType {
       },
     ],
     properties: [
-      // --- Slack Parameters ---
       {
         displayName: 'Channel ID',
         name: 'channelId',
@@ -94,7 +93,6 @@ export class SlackAiStreamingAgent implements INodeType {
         description: 'Workspace (team) ID',
         placeholder: 'T0123456789',
       },
-      // --- Prompt Parameters ---
       {
         displayName: 'Prompt Source',
         name: 'promptSource',
@@ -117,14 +115,10 @@ export class SlackAiStreamingAgent implements INodeType {
         displayName: 'Prompt',
         name: 'prompt',
         type: 'string',
-        typeOptions: {
-          rows: 4,
-        },
+        typeOptions: { rows: 4 },
         default: '',
         displayOptions: {
-          show: {
-            promptSource: ['defineBelow'],
-          },
+          show: { promptSource: ['defineBelow'] },
         },
         description: 'The user prompt to send to the AI model',
       },
@@ -132,13 +126,10 @@ export class SlackAiStreamingAgent implements INodeType {
         displayName: 'System Prompt',
         name: 'systemPrompt',
         type: 'string',
-        typeOptions: {
-          rows: 6,
-        },
+        typeOptions: { rows: 6 },
         default: '',
         description: 'Optional system prompt for the AI model',
       },
-      // --- Agent Options ---
       {
         displayName: 'Options',
         name: 'options',
@@ -147,45 +138,20 @@ export class SlackAiStreamingAgent implements INodeType {
         default: {},
         options: [
           {
-            displayName: 'Task Display Mode',
-            name: 'taskDisplayMode',
-            type: 'options',
-            options: [
-              {
-                name: 'Timeline',
-                value: 'timeline',
-                description: 'Show each tool step individually',
-              },
-              {
-                name: 'Plan',
-                value: 'plan',
-                description: 'Group tool steps together',
-              },
-            ],
-            default: 'timeline',
-            description: 'How tool execution steps are displayed in the Slack stream',
-          },
-          {
             displayName: 'Max Iterations',
             name: 'maxIterations',
             type: 'number',
-            typeOptions: {
-              minValue: 1,
-              maxValue: 50,
-            },
+            typeOptions: { minValue: 1, maxValue: 50 },
             default: 10,
             description: 'Maximum number of tool call iterations',
           },
           {
-            displayName: 'Append Throttle (ms)',
-            name: 'appendThrottleMs',
+            displayName: 'Stream Buffer Size (chars)',
+            name: 'streamBufferSize',
             type: 'number',
-            typeOptions: {
-              minValue: 50,
-              maxValue: 1000,
-            },
-            default: 100,
-            description: 'Minimum interval between appendStream calls',
+            typeOptions: { minValue: 16, maxValue: 512 },
+            default: 64,
+            description: 'Number of characters to buffer before sending to Slack. Smaller = more frequent updates.',
           },
           {
             displayName: 'Feedback Buttons',
@@ -199,22 +165,16 @@ export class SlackAiStreamingAgent implements INodeType {
             name: 'setThreadTitle',
             type: 'boolean',
             default: false,
-            description:
-              'Whether to automatically set the thread title from the first user message',
+            description: 'Whether to automatically set the thread title from the first user message',
           },
           {
             displayName: 'Max Title Length',
             name: 'maxTitleLength',
             type: 'number',
-            typeOptions: {
-              minValue: 10,
-              maxValue: 200,
-            },
+            typeOptions: { minValue: 10, maxValue: 200 },
             default: 50,
             displayOptions: {
-              show: {
-                setThreadTitle: [true],
-              },
+              show: { setThreadTitle: [true] },
             },
             description: 'Maximum character length for auto-generated thread titles',
           },
@@ -240,20 +200,17 @@ export class SlackAiStreamingAgent implements INodeType {
       const promptSource = this.getNodeParameter('promptSource', i) as PromptSource;
       const systemPrompt = this.getNodeParameter('systemPrompt', i, '') as string;
       const options = this.getNodeParameter('options', i, {}) as {
-        taskDisplayMode?: TaskDisplayMode;
         maxIterations?: number;
-        appendThrottleMs?: number;
+        streamBufferSize?: number;
         feedbackButtons?: boolean;
         setThreadTitle?: boolean;
         maxTitleLength?: number;
       };
 
-      // Resolve user prompt
       let userPrompt: string;
       if (promptSource === 'defineBelow') {
         userPrompt = this.getNodeParameter('prompt', i) as string;
       } else {
-        // Auto-detect from chatInput or input data
         const inputData = items[i].json;
         userPrompt =
           (inputData['chatInput'] as string) ??
@@ -267,14 +224,13 @@ export class SlackAiStreamingAgent implements INodeType {
         throw new Error('No user prompt found. Check input data or set Prompt Source to "Define Below".');
       }
 
-      // Initialize Slack stream manager
       const streamManager = new SlackStreamManager({
         client: slackClient,
         channel,
         threadTs,
         recipientUserId: userId,
         recipientTeamId: teamId,
-        bufferSize: options.appendThrottleMs ?? 64,
+        bufferSize: options.streamBufferSize ?? 64,
         enableFeedback: options.feedbackButtons ?? false,
       });
 
@@ -301,7 +257,6 @@ export class SlackAiStreamingAgent implements INodeType {
             userPrompt.length > maxLen
               ? userPrompt.substring(0, maxLen) + '...'
               : userPrompt;
-          // Fire-and-forget — non-critical, don't block agent execution
           void streamManager.setTitle(title);
         }
 
@@ -323,36 +278,26 @@ export class SlackAiStreamingAgent implements INodeType {
           ]);
         }
 
-        const durationMs = Date.now() - startTime;
         returnData.push({
           json: {
-            message_ts: streamManager.messageTs,
             channel,
             thread_ts: threadTs,
             response_text: result.responseText,
             intermediate_steps: result.intermediateSteps,
             token_count: result.tokenCount,
-            duration_ms: durationMs,
+            duration_ms: Date.now() - startTime,
           },
         });
       } catch (error) {
-        // Ensure stream is stopped on error
-        try {
-          await streamManager.stop();
-        } catch {
-          // Ignore stop errors during error handling
-        }
+        try { await streamManager.stop(); } catch { /* noop */ }
 
-        // Post error message to Slack thread
         try {
           await slackClient.chat.postMessage({
             channel,
             thread_ts: threadTs,
-            text: `An error occurred while processing your request. Please try again.`,
+            text: 'An error occurred while processing your request. Please try again.',
           });
-        } catch {
-          // Ignore Slack error notification failure
-        }
+        } catch { /* noop */ }
 
         throw error;
       }

@@ -5,9 +5,14 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 
-/**
- * Recursively search for a string value by key names in a nested object.
- */
+type ProviderFactory = (opts: { apiKey: string; baseURL?: string }) => (model: string) => LanguageModelV1;
+
+const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
+  anthropic: createAnthropic as ProviderFactory,
+  google: createGoogleGenerativeAI as ProviderFactory,
+  openai: createOpenAI as ProviderFactory,
+};
+
 function deepSearch(
   obj: unknown,
   keyNames: string[],
@@ -32,9 +37,6 @@ function deepSearch(
   return null;
 }
 
-/**
- * Extract API key from a LangChain model object.
- */
 function extractApiKey(model: Record<string, unknown>): string {
   const key = deepSearch(model, [
     'apiKey', 'openAIApiKey', 'anthropicApiKey', 'googleApiKey',
@@ -46,74 +48,33 @@ function extractApiKey(model: Record<string, unknown>): string {
   );
 }
 
-/**
- * Extract model name from a LangChain model object.
- */
 function extractModelName(model: Record<string, unknown>): string {
-  const name = deepSearch(model, ['modelName', 'model', 'modelId']);
-  return name ?? 'gpt-4o';
+  return deepSearch(model, ['modelName', 'model', 'modelId']) ?? 'gpt-4o';
 }
 
-/**
- * Extract base URL from a LangChain model object.
- */
 function extractBaseURL(model: Record<string, unknown>): string | undefined {
-  const url = deepSearch(model, [
+  return deepSearch(model, [
     'baseURL', 'basePath', 'base_url', 'baseUrl', 'apiBase', 'api_base',
-  ]);
-  return url ?? undefined;
+  ]) ?? undefined;
 }
 
-/**
- * Determine provider purely from the n8n node's constructor name.
- * This reflects which node the user connected (OpenAI Chat Model, Anthropic, etc.)
- */
-function detectProvider(constructorName: string): 'openai' | 'anthropic' | 'google' {
+function detectProvider(constructorName: string): string {
   const name = constructorName.toLowerCase();
   if (name.includes('anthropic')) return 'anthropic';
   if (name.includes('google') || name.includes('gemini')) return 'google';
-  return 'openai'; // ChatOpenAI and any other OpenAI-compatible nodes
+  return 'openai';
 }
 
-/**
- * Convert an n8n LangChain model sub-node to a Vercel AI SDK LanguageModelV1.
- * Uses the node type (constructor) to select the provider, and faithfully
- * passes through apiKey, baseURL, and model name from the credential.
- */
 function convertN8nModelToAiSdk(langchainModel: unknown): LanguageModelV1 {
   const model = langchainModel as Record<string, unknown>;
-  const constructorName = model.constructor?.name ?? '';
-
   const apiKey = extractApiKey(model);
   const modelName = extractModelName(model);
   const baseURL = extractBaseURL(model);
-  const provider = detectProvider(constructorName);
-
-  console.log(
-    `[SlackAiStreamingAgent] constructor=${constructorName} → provider=${provider}, ` +
-    `model=${modelName}, baseURL=${baseURL ?? '(default)'}`,
-  );
-
-  switch (provider) {
-    case 'anthropic': {
-      const p = createAnthropic({ apiKey, ...(baseURL ? { baseURL } : {}) });
-      return p(modelName);
-    }
-    case 'google': {
-      const p = createGoogleGenerativeAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
-      return p(modelName);
-    }
-    case 'openai':
-    default: {
-      const p = createOpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
-      return p(modelName);
-    }
-  }
+  const provider = detectProvider(model.constructor?.name ?? '');
+  const factory = PROVIDER_FACTORIES[provider] ?? PROVIDER_FACTORIES['openai'];
+  return factory({ apiKey, ...(baseURL ? { baseURL } : {}) })(modelName);
 }
 
-/**
- * Get the connected AI model sub-node and convert it to Vercel AI SDK format.
- */
 export async function getConnectedModel(
   ctx: IExecuteFunctions,
   itemIndex = 0,
@@ -127,4 +88,3 @@ export async function getConnectedModel(
   }
   return convertN8nModelToAiSdk(model);
 }
-

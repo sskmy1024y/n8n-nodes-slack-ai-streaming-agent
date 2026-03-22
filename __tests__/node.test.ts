@@ -88,18 +88,14 @@ describe('SlackAiStreamingAgent node definition', () => {
       const subOptions = optionsProp!.options as Array<{ name: string; default?: unknown }>;
       const subNames = subOptions.map((o) => o.name);
 
-      it('has taskDisplayMode', () => {
-        expect(subNames).toContain('taskDisplayMode');
-      });
-
       it('has maxIterations with default 10', () => {
         const maxIter = subOptions.find((o) => o.name === 'maxIterations');
         expect(maxIter!.default).toBe(10);
       });
 
-      it('has appendThrottleMs with default 100', () => {
-        const throttle = subOptions.find((o) => o.name === 'appendThrottleMs');
-        expect(throttle!.default).toBe(100);
+      it('has streamBufferSize with default 64', () => {
+        const buf = subOptions.find((o) => o.name === 'streamBufferSize');
+        expect(buf!.default).toBe(64);
       });
 
       it('has feedbackButtons with default false', () => {

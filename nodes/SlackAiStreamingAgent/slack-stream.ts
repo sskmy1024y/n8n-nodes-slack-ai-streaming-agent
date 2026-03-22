@@ -1,7 +1,27 @@
 import { WebClient } from '@slack/web-api';
 import type { ChatStreamer } from '@slack/web-api';
 import type { AnyChunk, TaskUpdateChunk } from '@slack/types';
-import type { TaskDisplayMode, FeedbackBlock } from './types';
+import type { FeedbackBlock } from './types';
+
+const FEEDBACK_BLOCKS: FeedbackBlock[] = [
+  {
+    type: 'context_actions',
+    elements: [
+      {
+        type: 'feedback_buttons',
+        action_id: 'feedback',
+        positive_button: {
+          text: { type: 'plain_text', text: 'Good Response' },
+          value: 'good-feedback',
+        },
+        negative_button: {
+          text: { type: 'plain_text', text: 'Bad Response' },
+          value: 'bad-feedback',
+        },
+      },
+    ],
+  },
+];
 
 export interface SlackStreamManagerOptions {
   client: WebClient;
@@ -9,7 +29,6 @@ export interface SlackStreamManagerOptions {
   threadTs: string;
   recipientUserId: string;
   recipientTeamId: string;
-  taskDisplayMode?: TaskDisplayMode;
   /** ChatStreamer buffer size in characters. Smaller = more frequent updates. */
   bufferSize?: number;
   enableFeedback?: boolean;
@@ -23,7 +42,7 @@ export class SlackStreamManager {
 
   private streamer: ChatStreamer;
   private appendQueue: Promise<unknown> = Promise.resolve();
-  private fullText = '';
+  private textChunks: string[] = [];
   private isStopped = false;
   private useFallback = false;
 
@@ -33,7 +52,6 @@ export class SlackStreamManager {
     this.threadTs = options.threadTs;
     this.enableFeedback = options.enableFeedback ?? false;
 
-    // Create the official ChatStreamer — handles startStream/appendStream lifecycle
     this.streamer = this.client.chatStream({
       channel: options.channel,
       thread_ts: options.threadTs,
@@ -43,13 +61,8 @@ export class SlackStreamManager {
     });
   }
 
-  get messageTs(): string | null {
-    // ChatStreamer doesn't expose ts, but it's not needed for output
-    return null;
-  }
-
   get responseText(): string {
-    return this.fullText;
+    return this.textChunks.join('');
   }
 
   async setStatus(status: string): Promise<void> {
@@ -76,17 +89,11 @@ export class SlackStreamManager {
     }
   }
 
-  /**
-   * Append a text delta. Returns immediately — Slack sends happen in the background
-   * via a serialized queue backed by the official ChatStreamer.
-   */
   appendText(delta: string): void {
-    this.fullText += delta;
+    this.textChunks.push(delta);
 
     if (this.isStopped || this.useFallback) return;
 
-    // Queue the append — ChatStreamer buffers internally and auto-flushes
-    // when the buffer reaches buffer_size characters
     this.appendQueue = this.appendQueue.then(() =>
       this.streamer.append({ markdown_text: delta }).catch(() => {
         this.useFallback = true;
@@ -110,7 +117,6 @@ export class SlackStreamManager {
       ...(details ? { details } : {}),
     };
 
-    // Wait for pending appends, then send the task update
     await this.appendQueue;
     if (this.useFallback) return;
 
@@ -126,7 +132,6 @@ export class SlackStreamManager {
     if (this.isStopped) return;
     this.isStopped = true;
 
-    // Wait for all queued appends to complete
     await this.appendQueue;
 
     if (this.useFallback) {
@@ -135,9 +140,8 @@ export class SlackStreamManager {
     }
 
     try {
-      const blocks = this.enableFeedback ? this.buildFeedbackBlocks() : undefined;
       await this.streamer.stop({
-        ...(blocks ? { blocks } : {}),
+        ...(this.enableFeedback ? { blocks: FEEDBACK_BLOCKS } : {}),
       });
     } catch {
       await this.postFallbackMessage();
@@ -147,39 +151,18 @@ export class SlackStreamManager {
   }
 
   private async postFallbackMessage(): Promise<void> {
-    if (!this.fullText) return;
+    const text = this.responseText;
+    if (!text) return;
 
     try {
       await this.client.chat.postMessage({
         channel: this.channel,
         thread_ts: this.threadTs,
-        text: this.fullText,
-        ...(this.enableFeedback ? { blocks: this.buildFeedbackBlocks() } : {}),
+        text,
+        ...(this.enableFeedback ? { blocks: FEEDBACK_BLOCKS } : {}),
       });
     } catch {
       // Last resort failed
     }
-  }
-
-  private buildFeedbackBlocks(): FeedbackBlock[] {
-    return [
-      {
-        type: 'context_actions',
-        elements: [
-          {
-            type: 'feedback_buttons',
-            action_id: 'feedback',
-            positive_button: {
-              text: { type: 'plain_text', text: 'Good Response' },
-              value: 'good-feedback',
-            },
-            negative_button: {
-              text: { type: 'plain_text', text: 'Bad Response' },
-              value: 'bad-feedback',
-            },
-          },
-        ],
-      },
-    ];
   }
 }
