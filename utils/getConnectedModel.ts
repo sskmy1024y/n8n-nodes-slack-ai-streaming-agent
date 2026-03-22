@@ -5,14 +5,6 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 
-type ProviderFactory = (opts: { apiKey: string; baseURL?: string }) => (model: string) => LanguageModelV1;
-
-const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
-  anthropic: createAnthropic as ProviderFactory,
-  google: createGoogleGenerativeAI as ProviderFactory,
-  openai: createOpenAI as ProviderFactory,
-};
-
 function deepSearch(
   obj: unknown,
   keyNames: string[],
@@ -58,7 +50,7 @@ function extractBaseURL(model: Record<string, unknown>): string | undefined {
   ]) ?? undefined;
 }
 
-function detectProvider(constructorName: string): string {
+function detectProvider(constructorName: string): 'openai' | 'anthropic' | 'google' {
   const name = constructorName.toLowerCase();
   if (name.includes('anthropic')) return 'anthropic';
   if (name.includes('google') || name.includes('gemini')) return 'google';
@@ -71,8 +63,17 @@ function convertN8nModelToAiSdk(langchainModel: unknown): LanguageModelV1 {
   const modelName = extractModelName(model);
   const baseURL = extractBaseURL(model);
   const provider = detectProvider(model.constructor?.name ?? '');
-  const factory = PROVIDER_FACTORIES[provider] ?? PROVIDER_FACTORIES['openai'];
-  return factory({ apiKey, ...(baseURL ? { baseURL } : {}) })(modelName);
+  const opts = { apiKey, ...(baseURL ? { baseURL } : {}) };
+
+  switch (provider) {
+    case 'anthropic':
+      return createAnthropic(opts)(modelName);
+    case 'google':
+      return createGoogleGenerativeAI(opts)(modelName);
+    case 'openai':
+    default:
+      return createOpenAI(opts)(modelName);
+  }
 }
 
 export async function getConnectedModel(

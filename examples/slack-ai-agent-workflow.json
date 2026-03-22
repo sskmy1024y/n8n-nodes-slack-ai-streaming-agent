@@ -72,6 +72,11 @@
                     "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
                     "rightValue": "app_mention",
                     "operator": { "type": "string", "operation": "equals" }
+                  },
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.subtype }}",
+                    "rightValue": "",
+                    "operator": { "type": "string", "operation": "empty" }
                   }
                 ]
               },
@@ -86,6 +91,11 @@
                     "leftValue": "={{ $('Webhook').item.json.body.event?.type }}",
                     "rightValue": "message",
                     "operator": { "type": "string", "operation": "equals" }
+                  },
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.event?.subtype }}",
+                    "rightValue": "",
+                    "operator": { "type": "string", "operation": "empty" }
                   },
                   {
                     "leftValue": "={{ $('Webhook').item.json.body.event?.bot_id }}",

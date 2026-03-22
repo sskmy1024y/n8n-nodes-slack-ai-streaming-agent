@@ -89,10 +89,17 @@ export async function executeAgent(
     },
   });
 
-  // Relay text stream to Slack — appendText is non-blocking, sends happen in background
-  for await (const delta of result.textStream) {
-    streamManager.appendText(delta);
+  let chunkCount = 0;
+  try {
+    for await (const delta of result.textStream) {
+      chunkCount++;
+      streamManager.appendText(delta);
+    }
+  } catch (err) {
+    console.error('[SlackAiStreamingAgent] Stream error:', err);
+    throw err;
   }
+  console.log(`[SlackAiStreamingAgent] Stream done: ${chunkCount} chunks, ${streamManager.responseText.length} chars`);
 
   const finalResult = await result;
   const usage = await finalResult.usage;
