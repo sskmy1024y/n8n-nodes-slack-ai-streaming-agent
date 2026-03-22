@@ -1,43 +1,44 @@
 # n8n-nodes-slack-ai-streaming-agent
 
-n8n の AI Agent ノードと同等のサブノード接続（Model / Tools / Memory）を持ちつつ、LLM のトークンストリーミングを Slack AI Apps のネイティブストリーミング API にリアルタイム中継するカスタムコミュニティノード。
+A custom n8n community node that streams AI agent responses to Slack in real time using the native Slack AI Apps streaming API. Supports the same sub-node connections (Model / Tools / Memory) as n8n's built-in AI Agent node.
 
-## 特徴
+## Demo
 
-- Slack AI Apps の `chat.startStream` / `chat.appendStream` / `chat.stopStream` によるリアルタイムストリーミング
-- 「編集済み」マーク無しでの応答表示
-- n8n 標準の LangChain サブノード（Model / Tools / Memory）をそのまま接続可能
-- Tool 実行ステップを `task_update` チャンクで Slack UI に表示
-- スロットリング・バッファリング・フォールバック（`chat.postMessage`）を内蔵
-- フィードバックボタン（👍👎）対応
+https://github.com/user-attachments/assets/78b9b67e-76cb-427a-805f-f34c83b4b932
 
-## 前提条件
+## Features
 
-- **n8n** v1.0 以上（セルフホスト）
-- **Slack App** で **Agents & AI Apps** 機能が有効化されていること
-- **Node.js** 18 以上
+- **Real-time streaming** — Tokens appear in Slack as they are generated, just like ChatGPT or Claude
+- **No "edited" label** — Uses Slack's native streaming API, not message editing
+- **Sub-node connections** — Connect any n8n LangChain model, tool, or memory node
+- **Tool step display** — Tool execution steps shown as `task_update` chunks in the Slack UI
+- **Automatic fallback** — Falls back to `chat.postMessage` if streaming fails
+- **Feedback buttons** — Optional thumbs up/down buttons on responses
 
-## インストール
+## Prerequisites
 
-### 方法 1: npm（推奨）
+- **n8n** v1.0+ (self-hosted)
+- **Slack App** with **Agents & AI Apps** feature enabled
+- **Node.js** 18+
 
-n8n の GUI からインストール:
+## Installation
 
-1. **Settings** → **Community Nodes** → **Install a community node**
-2. パッケージ名に `n8n-nodes-slack-ai-streaming-agent` を入力
-3. **Install** をクリック
+### Option 1: npm (recommended)
 
-または CLI で:
+Install via the n8n GUI:
+
+1. **Settings** > **Community Nodes** > **Install a community node**
+2. Enter `n8n-nodes-slack-ai-streaming-agent`
+3. Click **Install**
+
+Or via CLI:
 
 ```bash
-# n8n のカスタムノードディレクトリに移動
 cd ~/.n8n/custom
-
-# インストール
 npm install n8n-nodes-slack-ai-streaming-agent
 ```
 
-### 方法 2: ソースからビルド（開発用）
+### Option 2: Build from source
 
 ```bash
 git clone <repository-url> n8n-nodes-slack-ai-streaming-agent
@@ -46,20 +47,17 @@ npm install
 npm run build
 ```
 
-ビルド後、n8n にリンク:
+Then link to n8n:
 
 ```bash
-# グローバルリンク
 npm link
-
-# n8n のカスタムノードディレクトリでリンク
 cd ~/.n8n/custom
 npm link n8n-nodes-slack-ai-streaming-agent
 ```
 
-### 方法 3: Docker（ボリュームマウント）
+### Option 3: Docker (volume mount)
 
-`docker-compose.yml` に以下を追加:
+Add to your `docker-compose.yml`:
 
 ```yaml
 services:
@@ -70,151 +68,151 @@ services:
       - ./n8n-nodes-slack-ai-streaming-agent/package.json:/home/node/.n8n/custom/node_modules/n8n-nodes-slack-ai-streaming-agent/package.json
 ```
 
-> **注意:** いずれの方法でもインストール後に **n8n の再起動** が必要です。
+> **Note:** Restart n8n after installation.
 
-## Slack App のセットアップ
+## Slack App Setup
 
-### 1. App の作成と設定
+### 1. Create and configure the app
 
-1. [Slack API](https://api.slack.com/apps) で新しい App を作成
-2. **Features** → **Agents & AI Apps** をトグル ON
-3. **OAuth & Permissions** で以下のスコープを追加:
+1. Create a new app at [Slack API](https://api.slack.com/apps)
+2. Enable **Agents & AI Apps** under **Features**
+3. Add the following scopes under **OAuth & Permissions**:
 
-| スコープ | 用途 |
+| Scope | Purpose |
 |---|---|
-| `chat:write` | メッセージ送信、ストリーミング |
-| `assistant:write` | AI Apps 機能（ステータス、プロンプト、タイトル） |
-| `im:history` | DM スレッドの会話履歴取得 |
+| `chat:write` | Send messages and stream |
+| `assistant:write` | AI Apps features (status, prompts, title) |
+| `im:history` | Read DM thread history |
+| `channels:history` | Read channel thread history |
+| `app_mentions:read` | Receive @mention events in channels |
 
-### 2. イベントの購読
+### 2. Subscribe to events
 
-**Event Subscriptions** を有効にし、Request URL に n8n の Webhook URL を設定:
+Enable **Event Subscriptions** and set the Request URL to your n8n webhook:
 
 ```
 https://your-n8n-domain.example.com/webhook/slack-events
 ```
 
-以下の Bot Events を購読:
+Subscribe to these Bot Events:
 
 - `assistant_thread_started`
 - `assistant_thread_context_changed`
 - `message.im`
+- `message.channels`
+- `app_mention`
 
 ### 3. App Manifest
 
-テンプレートの [`slack-app-manifest.json`](slack-app-manifest.json) を使用できます。
+Use the template [`examples/slack-app-manifest.json`](examples/slack-app-manifest.json):
 
-1. `request_url` を実際の n8n Webhook URL に書き換え
-2. [Slack API](https://api.slack.com/apps) → **App Manifests** に貼り付け
+1. Replace `request_url` with your actual n8n webhook URL
+2. Paste into [Slack API](https://api.slack.com/apps) > **App Manifests**
 
-### 4. Bot Token の取得
+### 4. Get the Bot Token
 
-**OAuth & Permissions** → **Install to Workspace** → 生成された **Bot User OAuth Token**（`xoxb-...`）をコピー。
+**OAuth & Permissions** > **Install to Workspace** > Copy the **Bot User OAuth Token** (`xoxb-...`).
 
-## n8n での使い方
+## Usage in n8n
 
-### 1. Credential の登録
+### 1. Set up credentials
 
-n8n 標準の Slack credential をそのまま使用します。
+Uses n8n's built-in Slack credential:
 
-1. **Credentials** → **New Credential** → **Slack API** を選択
-2. **Access Token** フィールドに `xoxb-...` トークンを入力
-3. **Save** → **Test** で接続確認
+1. **Credentials** > **New Credential** > **Slack API**
+2. Enter the `xoxb-...` token in the **Access Token** field
+3. **Save** > **Test**
 
-> 既存の Slack credential がある場合はそのまま選択できます。
+> You can reuse an existing Slack credential if you have one.
 
-### 2. ワークフローの構築
+### 2. Build the workflow
 
-テンプレートの [`examples/slack-ai-agent-workflow.json`](examples/slack-ai-agent-workflow.json) を n8n にインポートすると、以下の構成がそのまま使えます。
+Import the template [`examples/slack-ai-agent-workflow.json`](examples/slack-ai-agent-workflow.json) into n8n:
 
-> **インポート方法:** n8n の画面右上 **⋮** → **Import from File** → JSON ファイルを選択
+> **How to import:** Click **...** (top right) > **Import from File** > Select the JSON file
 
-#### 基本構成
+#### Workflow structure
 
 ```
-[Webhook Trigger]
-  │
-  ├─ (event_type == "assistant_thread_started")
-  │   └→ [HTTP Request] assistant.threads.setSuggestedPrompts
-  │
-  ├─ (event_type == "message.im")
-  │   └→ [Slack AI Streaming Agent]
-  │        ├── Model: OpenAI Chat Model (gpt-4o)
-  │        ├── Tools: HTTP Request Tool, Code Tool 等
-  │        └── Memory: Window Buffer Memory
-  │
-  └→ [後処理] ログ記録等
+[Webhook]
+  |
+  +- Respond 200 (immediate response to Slack)
+  |
+  +- Route by Event (Switch)
+       |
+       +- (assistant_thread_started)
+       |   -> [Set Suggested Prompts]
+       |
+       +- (app_mention / message.im)
+           -> [Extract Event Data]
+               -> [Slack AI Streaming Agent]
+                    +-- Model: OpenAI Chat Model
+                    +-- Tools: (optional)
+                    +-- Memory: Window Buffer Memory
 ```
 
-#### Webhook Trigger の設定
+#### Webhook settings
 
-| 項目 | 値 |
+| Setting | Value |
 |---|---|
 | HTTP Method | POST |
 | Path | `/slack-events` |
-| Response Mode | **Immediately** |
-| Response Code | 200 |
+| Response Mode | **Using 'Respond to Webhook' Node** |
 
-> **重要:** Slack Events API は 3 秒以内に 200 応答を要求します。Response Mode は必ず **Immediately** にしてください。
+> **Important:** Slack Events API requires a 200 response within 3 seconds. The Respond 200 node handles this immediately, allowing the workflow to continue processing asynchronously.
 
-#### Slack AI Streaming Agent ノードの設定
+#### Slack AI Streaming Agent parameters
 
-| パラメータ | 設定例 | 説明 |
+| Parameter | Example | Description |
 |---|---|---|
-| Channel ID | `{{ $json.event.channel }}` | Slack イベントの channel フィールド |
-| Thread TS | `{{ $json.event.thread_ts \|\| $json.event.ts }}` | スレッドのタイムスタンプ |
-| Recipient User ID | `{{ $json.event.user }}` | メッセージ送信者のユーザー ID |
-| Recipient Team ID | `{{ $json.team_id }}` | ワークスペース ID |
-| Prompt Source | Take from Previous Node | 前ノードの `chatInput` を自動取得 |
-| System Prompt | （任意） | AI の振る舞いを指定 |
+| Channel ID | `{{ $json.channel }}` | Channel from the Slack event |
+| Thread TS | `{{ $json.thread_ts }}` | Thread timestamp |
+| Recipient User ID | `{{ $json.user_id }}` | User who sent the message |
+| Recipient Team ID | `{{ $json.team_id }}` | Workspace ID |
+| Prompt Source | Take from Previous Node | Auto-detects `chatInput` from input |
+| System Prompt | (optional) | Instructions for the AI model |
 
-#### Options（オプション設定）
+#### Options
 
-| オプション | デフォルト | 説明 |
+| Option | Default | Description |
 |---|---|---|
-| Task Display Mode | `timeline` | Tool ステップの表示形式（`timeline`: 個別 / `plan`: グループ） |
-| Max Iterations | `10` | Tool 呼び出しの最大反復回数 |
-| Append Throttle (ms) | `100` | `appendStream` の最小送信間隔 |
-| Feedback Buttons | `false` | 応答末尾に 👍👎 ボタンを表示 |
-| Set Thread Title | `false` | ユーザーメッセージからスレッドタイトルを自動設定 |
+| Max Iterations | `10` | Maximum tool call iterations |
+| Stream Buffer Size | `64` | Characters to buffer before sending to Slack (smaller = more frequent updates) |
+| Feedback Buttons | `false` | Show thumbs up/down buttons after the response |
+| Set Thread Title | `false` | Auto-set thread title from the user's message |
 
-### 3. サブノードの接続
+### 3. Connect sub-nodes
 
-#### Model（必須）
+#### Model (required)
 
-n8n 標準の LLM モデルノードを接続:
+Connect any n8n LLM model node:
 
 - OpenAI Chat Model
 - Anthropic Chat Model
 - Google Gemini Chat Model
 
-#### Tools（任意）
-
-n8n 標準の Tool ノードを接続:
+#### Tools (optional)
 
 - HTTP Request Tool
 - Code Tool
 - Calculator
-- Wikipedia
-- その他カスタム Tool
+- Any custom tool
 
-#### Memory（任意）
+#### Memory (optional)
 
-n8n 標準の Memory ノードを接続:
+- Window Buffer Memory (in-memory, lost on restart)
+- Postgres Chat Memory (persistent, recommended for production)
+- Redis Chat Memory (persistent)
 
-- Window Buffer Memory（推奨）
-- Buffer Memory
+### 4. Output data
 
-### 4. 出力データ
-
-ノードは以下の JSON を出力します:
+The node outputs:
 
 ```json
 {
-  "message_ts": "1724264405.531769",
   "channel": "D324567865",
   "thread_ts": "1724264400.000000",
-  "response_text": "AI の完全な応答テキスト",
+  "response_text": "The full AI response text",
   "intermediate_steps": [
     {
       "toolName": "http_request",
@@ -228,43 +226,24 @@ n8n 標準の Memory ノードを接続:
 }
 ```
 
-## 開発
+## Development
 
 ```bash
-# 依存パッケージのインストール
-npm install
-
-# ビルド
-npm run build
-
-# 型チェック
-npm run lint
-
-# テスト
-npm test
-
-# 開発モード（ファイル変更を監視）
-npm run dev
+npm install       # Install dependencies
+npm run build     # Build
+npm run lint      # Type check
+npm test          # Run tests
+npm run dev       # Watch mode
 ```
 
-### テスト
+## Limitations
 
-```bash
-# 全テスト実行
-npm test
+- Streaming only works **within threads** (DMs are always threaded)
+- Block Kit cannot be used during streaming (only on `stopStream`)
+- Unfurls are disabled during streaming
+- Workspace guests cannot access the Agents & AI Apps feature
+- Slack AI Apps requires a paid plan ([Developer Program](https://api.slack.com/developer-program) offers a free sandbox)
 
-# カバレッジ付き
-npx jest --coverage
-```
-
-## 制約事項
-
-- ストリーミングは **スレッド内でのみ** 動作します（DM は全てスレッドとして扱われます）
-- ストリーミング中は Block Kit を使用できません（`stopStream` 時のみ可能）
-- ストリーミング中の unfurl は無効化されます
-- Workspace ゲストは Agents & AI Apps 機能にアクセスできません
-- Slack AI Apps 機能は有料プランが必要です（[Developer Program](https://api.slack.com/developer-program) で無料サンドボックス利用可）
-
-## ライセンス
+## License
 
 MIT
