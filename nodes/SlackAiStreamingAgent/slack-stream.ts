@@ -8,7 +8,6 @@ class SlackStreamThrottler {
   private buffer = '';
   private lastSendTime = 0;
   private minInterval: number;
-  private pendingFlush: Promise<void> | null = null;
 
   constructor(minIntervalMs = 100) {
     this.minInterval = minIntervalMs;
@@ -26,15 +25,21 @@ class SlackStreamThrottler {
   }
 
   async flush(sendFn: (text: string) => Promise<void>): Promise<void> {
-    if (this.pendingFlush) {
-      await this.pendingFlush;
-    }
     if (this.buffer.length > 0) {
       const chunk = this.buffer;
       this.buffer = '';
       this.lastSendTime = Date.now();
       await sendFn(chunk);
     }
+  }
+
+  /**
+   * Drain and return the remaining buffer without sending.
+   */
+  drain(): string {
+    const remaining = this.buffer;
+    this.buffer = '';
+    return remaining;
   }
 }
 
@@ -208,32 +213,22 @@ export class SlackStreamManager {
       return;
     }
 
-    // Flush remaining buffer
-    await this.throttler.flush(async (text) => {
-      try {
-        await this.client.apiCall('chat.appendStream', {
-          channel: this.channel,
-          message_ts: this.streamTs,
-          thread_ts: this.threadTs,
-          chunks: [{ type: 'markdown_text', markdown_text: text }],
-        });
-      } catch {
-        this.useFallback = true;
-      }
-    });
-
-    if (this.useFallback) {
-      await this.postFallbackMessage();
-      return;
-    }
+    // Drain remaining buffer — include it in stopStream chunks instead of
+    // sending a separate appendStream to avoid race conditions.
+    const remaining = this.throttler.drain();
 
     try {
       const blocks = this.enableFeedback ? this.buildFeedbackBlocks() : undefined;
+      const chunks: Array<{ type: string; markdown_text?: string }> = [];
+      if (remaining.length > 0) {
+        chunks.push({ type: 'markdown_text', markdown_text: remaining });
+      }
+
       await this.client.apiCall('chat.stopStream', {
         channel: this.channel,
         message_ts: this.streamTs,
         thread_ts: this.threadTs,
-        chunks: [],
+        chunks,
         ...(blocks ? { blocks } : {}),
       });
     } catch (error) {

@@ -3,12 +3,60 @@ import type { N8nMemory } from './getConnectedMemory';
 import type { MemoryAdapter } from '../nodes/SlackAiStreamingAgent/types';
 
 /**
- * LangChain message types used by n8n's memory sub-nodes.
+ * Get the message type from a LangChain message object.
+ * Handles both class instances (with _getType method) and plain objects.
  */
-interface LangChainMessage {
-  _getType(): string;
-  content: string | unknown[];
-  toJSON?(): unknown;
+function getMessageType(msg: unknown): string {
+  const record = msg as Record<string, unknown>;
+
+  // Class instance with _getType method
+  if (typeof record['_getType'] === 'function') {
+    return (record['_getType'] as () => string)();
+  }
+
+  // Plain object with type or lc_id
+  if (typeof record['type'] === 'string') return record['type'];
+
+  // LangChain serialized format: lc_id: ["langchain_core", "messages", "HumanMessage"]
+  const lcId = record['lc_id'] as string[] | undefined;
+  if (Array.isArray(lcId)) {
+    const last = lcId[lcId.length - 1]?.toLowerCase() ?? '';
+    if (last.includes('human')) return 'human';
+    if (last.includes('ai')) return 'ai';
+    if (last.includes('system')) return 'system';
+    if (last.includes('tool')) return 'tool';
+  }
+
+  // Check role field (already in CoreMessage-like format)
+  if (typeof record['role'] === 'string') {
+    const role = record['role'] as string;
+    if (role === 'user') return 'human';
+    if (role === 'assistant') return 'ai';
+    return role;
+  }
+
+  // data.type for serialized messages
+  const data = record['data'] as Record<string, unknown> | undefined;
+  if (data && typeof data['type'] === 'string') return data['type'];
+
+  return 'unknown';
+}
+
+/**
+ * Extract content from a LangChain message object.
+ */
+function getMessageContent(msg: unknown): string {
+  const record = msg as Record<string, unknown>;
+
+  if (typeof record['content'] === 'string') return record['content'];
+  if (record['content'] !== undefined) return JSON.stringify(record['content']);
+
+  // Serialized format
+  const data = record['data'] as Record<string, unknown> | undefined;
+  if (data && typeof data['content'] === 'string') return data['content'];
+  if (data && data['content'] !== undefined) return JSON.stringify(data['content']);
+
+  return '';
 }
 
 /**
@@ -27,13 +75,12 @@ export class ChatArrayMemory implements MemoryAdapter {
   }
 
   async load(): Promise<CoreMessage[]> {
-    const langchainMessages = (await this.memory.chatHistory.getMessages()) as LangChainMessage[];
+    const langchainMessages = await this.memory.chatHistory.getMessages();
     const coreMessages: CoreMessage[] = [];
 
     for (const msg of langchainMessages) {
-      const msgType = msg._getType();
-      const content =
-        typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+      const msgType = getMessageType(msg);
+      const content = getMessageContent(msg);
 
       if (msgType === 'human') {
         coreMessages.push({ role: 'user', content });

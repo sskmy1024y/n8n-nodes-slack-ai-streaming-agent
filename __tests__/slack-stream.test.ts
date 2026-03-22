@@ -270,7 +270,7 @@ describe('SlackStreamManager', () => {
   });
 
   describe('throttling', () => {
-    it('buffers rapid appends and flushes on stop', async () => {
+    it('buffers rapid appends and includes remaining in stopStream', async () => {
       const { mock, apiCall } = createMockClient();
       // Use a large throttle interval
       const manager = createManager(mock, { throttleMs: 10000 });
@@ -287,11 +287,11 @@ describe('SlackStreamManager', () => {
       const appendCallsBefore = apiCall.mock.calls.filter((c) => c[0] === 'chat.appendStream');
       expect(appendCallsBefore).toHaveLength(1); // only the ' ' was sent
 
-      // Stop flushes the remaining buffer
+      // Stop includes remaining buffer in stopStream chunks (not via appendStream)
       await manager.stop();
-      const allAppendCalls = apiCall.mock.calls.filter((c) => c[0] === 'chat.appendStream');
-      expect(allAppendCalls).toHaveLength(2); // ' ' + 'World!'
-      expect((allAppendCalls[1][1] as Record<string, unknown>)['chunks']).toEqual([
+      const stopCall = apiCall.mock.calls.find((c) => c[0] === 'chat.stopStream');
+      expect(stopCall).toBeDefined();
+      expect((stopCall![1] as Record<string, unknown>)['chunks']).toEqual([
         { type: 'markdown_text', markdown_text: 'World!' },
       ]);
     });
