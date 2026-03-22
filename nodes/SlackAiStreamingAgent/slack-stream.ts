@@ -29,7 +29,6 @@ class StreamLoop {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    // Wait for any in-flight send to complete
     if (this.inFlightPromise) {
       await this.inFlightPromise;
     }
@@ -44,17 +43,6 @@ class StreamLoop {
     }
   }
 
-  /** Return any unsent text without sending it */
-  drain(): string {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-    const text = this.pendingText;
-    this.pendingText = '';
-    return text;
-  }
-
   private scheduleFlush(): void {
     if (this.stopped || this.timer) return;
     this.timer = setTimeout(() => {
@@ -66,7 +54,6 @@ class StreamLoop {
   private async drainPending(): Promise<void> {
     if (this.pendingText.length === 0) return;
 
-    // Wait for previous send to complete (serialize sends)
     if (this.inFlightPromise) {
       await this.inFlightPromise;
     }
@@ -109,6 +96,10 @@ export class SlackStreamManager {
   private fullText = '';
   private isStopped = false;
   private useFallback = false;
+
+  // Guards against multiple startStream calls during async initialization
+  private startStreamPromise: Promise<void> | null = null;
+  private preStreamBuffer: string[] = [];
 
   constructor(options: SlackStreamManagerOptions) {
     this.client = options.client;
@@ -161,18 +152,20 @@ export class SlackStreamManager {
 
     if (this.isStopped || this.useFallback) return;
 
-    if (!this.streamTs) {
-      // First chunk — start the stream synchronously-ish
-      void this.startStream(delta);
+    // Stream already initialized → feed the loop
+    if (this.streamTs && this.streamLoop) {
+      this.streamLoop.update(delta);
       return;
     }
 
-    if (!this.streamLoop) {
-      this.streamLoop = new StreamLoop(this.throttleMs, (text) =>
-        this.sendAppendStream([{ type: 'markdown_text', markdown_text: text }]),
-      );
+    // Stream is being initialized → buffer for later
+    if (this.startStreamPromise) {
+      this.preStreamBuffer.push(delta);
+      return;
     }
-    this.streamLoop.update(delta);
+
+    // First token → start the stream
+    this.startStreamPromise = this.initializeStream(delta);
   }
 
   async sendTaskUpdate(
@@ -181,9 +174,13 @@ export class SlackStreamManager {
     status: 'pending' | 'in_progress' | 'complete' | 'error',
     details?: string,
   ): Promise<void> {
+    // Wait for stream to be ready
+    if (this.startStreamPromise) {
+      await this.startStreamPromise;
+    }
+
     if (!this.streamTs || this.isStopped || this.useFallback) return;
 
-    // Flush pending text first to maintain ordering
     if (this.streamLoop) {
       await this.streamLoop.flush();
     }
@@ -206,13 +203,18 @@ export class SlackStreamManager {
     if (this.isStopped) return;
     this.isStopped = true;
 
+    // Wait for stream initialization to complete
+    if (this.startStreamPromise) {
+      await this.startStreamPromise;
+    }
+
     if (!this.streamTs || this.useFallback) {
       if (this.streamLoop) this.streamLoop.stop();
       await this.postFallbackMessage();
       return;
     }
 
-    // Flush any remaining buffered text via the stream loop
+    // Flush remaining buffered text
     if (this.streamLoop) {
       await this.streamLoop.flush();
       this.streamLoop.stop();
@@ -242,20 +244,11 @@ export class SlackStreamManager {
     await this.setStatus('');
   }
 
-  private async sendAppendStream(chunks: unknown[]): Promise<void> {
-    try {
-      await this.client.apiCall('chat.appendStream', {
-        channel: this.channel,
-        message_ts: this.streamTs,
-        thread_ts: this.threadTs,
-        chunks,
-      });
-    } catch {
-      this.useFallback = true;
-    }
-  }
-
-  private async startStream(firstChunk: string): Promise<void> {
+  /**
+   * Initialize the stream: call startStream, create the StreamLoop,
+   * and flush any tokens that arrived during initialization.
+   */
+  private async initializeStream(firstChunk: string): Promise<void> {
     try {
       const response = await this.client.apiCall('chat.startStream', {
         channel: this.channel,
@@ -269,13 +262,34 @@ export class SlackStreamManager {
       const result = response as { ok: boolean; ts?: string; error?: string };
       if (result.ok && result.ts) {
         this.streamTs = result.ts;
-        // Initialize the stream loop now that we have a stream TS
+
+        // Create the stream loop for subsequent tokens
         this.streamLoop = new StreamLoop(this.throttleMs, (text) =>
           this.sendAppendStream([{ type: 'markdown_text', markdown_text: text }]),
         );
+
+        // Flush tokens that arrived while startStream was in progress
+        if (this.preStreamBuffer.length > 0) {
+          const buffered = this.preStreamBuffer.join('');
+          this.preStreamBuffer = [];
+          this.streamLoop.update(buffered);
+        }
       } else {
         this.useFallback = true;
       }
+    } catch {
+      this.useFallback = true;
+    }
+  }
+
+  private async sendAppendStream(chunks: unknown[]): Promise<void> {
+    try {
+      await this.client.apiCall('chat.appendStream', {
+        channel: this.channel,
+        message_ts: this.streamTs,
+        thread_ts: this.threadTs,
+        chunks,
+      });
     } catch {
       this.useFallback = true;
     }
