@@ -279,6 +279,81 @@ describe('getConnectedTools', () => {
     const tools = await getConnectedTools(mockCtx);
     expect(Object.keys(tools)).toEqual(['tool_a', 'tool_b']);
   });
+
+  it('executes a tool that only exposes func/call (no invoke)', async () => {
+    const { getConnectedTools } = await import('../utils/getConnectedTools');
+    const callFn = jest.fn().mockResolvedValue('called');
+    // DynamicTool-style wrapper: has name + call, but no `invoke`.
+    const toolWithCall = { name: 'legacy_tool', description: 'Legacy', call: callFn };
+    const mockCtx = {
+      getInputConnectionData: jest.fn().mockResolvedValue([toolWithCall]),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    const tools = await getConnectedTools(mockCtx);
+    expect(Object.keys(tools)).toEqual(['legacy_tool']);
+
+    const execute = (tools['legacy_tool'] as unknown as {
+      execute: (args: Record<string, unknown>) => Promise<unknown>;
+    }).execute;
+    const result = await execute({ x: 1 });
+    expect(callFn).toHaveBeenCalledWith({ x: 1 });
+    expect(result).toBe('called');
+  });
+
+  it('expands a StructuredToolkit (MCP Client Tool) via getTools()', async () => {
+    const { getConnectedTools } = await import('../utils/getConnectedTools');
+    const mcpTool1 = { name: 'mcp_search', description: 'Search', invoke: jest.fn().mockResolvedValue('r1') };
+    const mcpTool2 = { name: 'mcp_fetch', description: 'Fetch', invoke: jest.fn().mockResolvedValue('r2') };
+    // Mimics n8n's StructuredToolkit: has getTools() + .tools, but no `name`.
+    const toolkit = {
+      tools: [mcpTool1, mcpTool2],
+      getTools: () => [mcpTool1, mcpTool2],
+    };
+    const mockCtx = {
+      // getInputConnectionData(AiTool) returns an array of supplyData responses.
+      getInputConnectionData: jest.fn().mockResolvedValue([toolkit]),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    const tools = await getConnectedTools(mockCtx);
+    expect(Object.keys(tools)).toEqual(['mcp_search', 'mcp_fetch']);
+  });
+
+  it('mixes plain tools and a toolkit in one connection', async () => {
+    const { getConnectedTools } = await import('../utils/getConnectedTools');
+    const plain = { name: 'calculator', description: 'Calc', invoke: jest.fn().mockResolvedValue('4') };
+    const mcpTool = { name: 'mcp_list', description: 'List', invoke: jest.fn().mockResolvedValue('ok') };
+    const toolkit = { tools: [mcpTool], getTools: () => [mcpTool] };
+    const mockCtx = {
+      getInputConnectionData: jest.fn().mockResolvedValue([plain, toolkit]),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    const tools = await getConnectedTools(mockCtx);
+    expect(Object.keys(tools).sort()).toEqual(['calculator', 'mcp_list']);
+  });
+
+  it('preserves a zod schema from a differing zod instance (duck-typed)', async () => {
+    const { getConnectedTools } = await import('../utils/getConnectedTools');
+    // Simulate a zod schema produced by n8n's bundled (different) zod instance.
+    const foreignZodSchema = {
+      _def: { typeName: 'ZodObject' },
+      parse: (v: unknown) => v,
+      safeParse: (v: unknown) => ({ success: true, data: v }),
+    };
+    const mcpTool = {
+      name: 'mcp_with_args',
+      description: 'Takes args',
+      schema: foreignZodSchema,
+      invoke: jest.fn().mockResolvedValue('ok'),
+    };
+    const toolkit = { tools: [mcpTool], getTools: () => [mcpTool] };
+    const mockCtx = {
+      getInputConnectionData: jest.fn().mockResolvedValue([toolkit]),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    const tools = await getConnectedTools(mockCtx);
+    // The schema object is forwarded as-is, not replaced with z.record fallback.
+    expect((tools['mcp_with_args'] as { parameters: unknown }).parameters).toBe(foreignZodSchema);
+  });
 });
 
 // --- getConnectedMemory tests ---
