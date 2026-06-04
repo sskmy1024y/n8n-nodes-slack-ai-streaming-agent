@@ -29,7 +29,9 @@ jobs:
 
       - run: npm config set registry https://registry.npmjs.org/
 
-      - run: npm publish --provenance --access public
+      # Pre-releases publish under the `beta` dist-tag so they don't become the
+      # default `latest` that `npm install` / n8n community-node install pulls.
+      - run: npm publish --provenance --access public --tag ${{ github.event.release.prerelease && 'beta' || 'latest' }}
 
   publish-github:
     needs: publish-npm
@@ -58,6 +60,6 @@ jobs:
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
           "
 
-      - run: npm publish
+      - run: npm publish --tag ${{ github.event.release.prerelease && 'beta' || 'latest' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
