@@ -9,7 +9,7 @@
   "author": "",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sskmy1024y/n8n-slack-ai-streaming-agent"
+    "url": "https://github.com/sskmy1024y/n8n-nodes-slack-ai-streaming-agent"
   },
   "main": "dist/nodes/SlackAiStreamingAgent/SlackAiStreamingAgent.node.js",
   "files": [
