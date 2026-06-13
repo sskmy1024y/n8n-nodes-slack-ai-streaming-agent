@@ -266,6 +266,27 @@ describe('getConnectedTools', () => {
     expect(tools['my_tool']).toHaveProperty('execute');
   });
 
+  it('reads tool connections from index 0 even for later main input items', async () => {
+    const { getConnectedTools } = await import('../utils/getConnectedTools');
+    const { NodeConnectionTypes } = await import('n8n-workflow');
+    const mockTool = {
+      name: 'shared_tool',
+      description: 'Available to every item',
+      invoke: jest.fn().mockResolvedValue('ok'),
+    };
+    const mockCtx = {
+      getInputConnectionData: jest.fn().mockImplementation((_type, itemIndex) => {
+        if (itemIndex !== 0) throw new Error('No tool data for this item');
+        return Promise.resolve(mockTool);
+      }),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    const tools = await getConnectedTools(mockCtx, 3);
+
+    expect(mockCtx.getInputConnectionData).toHaveBeenCalledWith(NodeConnectionTypes.AiTool, 0);
+    expect(tools).toHaveProperty('shared_tool');
+  });
+
   it('flattens nested tool arrays', async () => {
     const { getConnectedTools } = await import('../utils/getConnectedTools');
     const tool1 = { name: 'tool_a', description: 'A', invoke: jest.fn().mockResolvedValue('a') };

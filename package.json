@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-slack-ai-streaming-agent",
-  "version": "0.1.1-beta.2",
+  "version": "0.1.1-beta.3",
   "description": "n8n AI Agent node with native Slack streaming output",
   "keywords": [
     "n8n-community-node-package"
