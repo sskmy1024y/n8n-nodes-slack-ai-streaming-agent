@@ -18,10 +18,10 @@ export interface N8nMemory {
  */
 export async function getConnectedMemory(
   ctx: IExecuteFunctions,
-  itemIndex = 0,
+  _itemIndex = 0,
 ): Promise<N8nMemory | null> {
   try {
-    const memory = await ctx.getInputConnectionData(NodeConnectionTypes.AiMemory, itemIndex);
+    const memory = await ctx.getInputConnectionData(NodeConnectionTypes.AiMemory, 0);
     if (!memory) return null;
     return memory as N8nMemory;
   } catch {
