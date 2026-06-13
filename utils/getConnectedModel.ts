@@ -84,11 +84,11 @@ function convertN8nModelToAiSdk(langchainModel: unknown): LanguageModelV1 {
 
 export async function getConnectedModel(
   ctx: IExecuteFunctions,
-  itemIndex = 0,
+  _itemIndex = 0,
 ): Promise<LanguageModelV1> {
   const model = await ctx.getInputConnectionData(
     NodeConnectionTypes.AiLanguageModel,
-    itemIndex,
+    0,
   );
   if (!model) {
     throw new Error('No AI model connected. Please connect a language model sub-node.');

@@ -224,6 +224,29 @@ describe('getConnectedModel', () => {
 
     await expect(getConnectedModel(mockCtx)).rejects.toThrow('No AI model connected');
   });
+
+  it('reads model connection from index 0 even for later main input items', async () => {
+    const { getConnectedModel } = await import('../utils/getConnectedModel');
+    const { NodeConnectionTypes } = await import('n8n-workflow');
+    const mockModel = {
+      constructor: { name: 'ChatOpenAI' },
+      openAIApiKey: 'test-key',
+      modelName: 'gpt-4o-mini',
+    };
+    const mockCtx = {
+      getInputConnectionData: jest.fn().mockImplementation((_type, itemIndex) => {
+        if (itemIndex !== 0) throw new Error('No model data for this item');
+        return Promise.resolve(mockModel);
+      }),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    await getConnectedModel(mockCtx, 2);
+
+    expect(mockCtx.getInputConnectionData).toHaveBeenCalledWith(
+      NodeConnectionTypes.AiLanguageModel,
+      0,
+    );
+  });
 });
 
 // --- getConnectedTools tests ---
@@ -398,6 +421,23 @@ describe('getConnectedMemory', () => {
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const memory = await getConnectedMemory(mockCtx);
+    expect(memory).toBe(mockMemory);
+  });
+
+  it('reads memory connection from index 0 even for later main input items', async () => {
+    const { getConnectedMemory } = await import('../utils/getConnectedMemory');
+    const { NodeConnectionTypes } = await import('n8n-workflow');
+    const mockMemory = { chatHistory: { getMessages: jest.fn(), addMessage: jest.fn() } };
+    const mockCtx = {
+      getInputConnectionData: jest.fn().mockImplementation((_type, itemIndex) => {
+        if (itemIndex !== 0) throw new Error('No memory data for this item');
+        return Promise.resolve(mockMemory);
+      }),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    const memory = await getConnectedMemory(mockCtx, 4);
+
+    expect(mockCtx.getInputConnectionData).toHaveBeenCalledWith(NodeConnectionTypes.AiMemory, 0);
     expect(memory).toBe(mockMemory);
   });
 });
