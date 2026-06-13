@@ -1,6 +1,6 @@
 import { executeAgent } from '../nodes/SlackAiStreamingAgent/agent-executor';
 import type { SlackStreamManager } from '../nodes/SlackAiStreamingAgent/slack-stream';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModelV1, ToolSet } from 'ai';
 
 // Mock the 'ai' module
 jest.mock('ai', () => {
@@ -282,6 +282,35 @@ describe('executeAgent', () => {
 
     expect(mockStreamText).toHaveBeenCalledWith(expect.objectContaining({
       tools: undefined,
+    }));
+  });
+
+  it('passes connected tools through to streamText', async () => {
+    mockStreamText.mockImplementation(() => {
+      return createMockStreamResult({
+        chunks: ['ok'],
+      }) as unknown as ReturnType<typeof streamText>;
+    });
+
+    const tools = {
+      calculator: {
+        description: 'Calc',
+        parameters: {},
+        execute: jest.fn(),
+      },
+    } as unknown as ToolSet;
+
+    const streamManager = createMockStreamManager();
+    await executeAgent({
+      model: createMockModel(),
+      tools,
+      messages: [{ role: 'user', content: 'test' }],
+      maxSteps: 1,
+      streamManager,
+    });
+
+    expect(mockStreamText).toHaveBeenCalledWith(expect.objectContaining({
+      tools,
     }));
   });
 

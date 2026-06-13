@@ -127,11 +127,14 @@ function convertToolSchema(schema: unknown): z.ZodTypeAny | ReturnType<typeof js
  */
 export async function getConnectedTools(
   ctx: IExecuteFunctions,
-  itemIndex = 0,
+  _itemIndex = 0,
 ): Promise<ToolSet> {
   let rawTools: unknown;
   try {
-    rawTools = await ctx.getInputConnectionData(NodeConnectionTypes.AiTool, itemIndex);
+    // AI tool sub-nodes supply configuration-level data, not per-main-item data.
+    // This mirrors n8n's own AI Agent helper, which always reads tool connections
+    // at index 0 so connected tools are available for every processed item.
+    rawTools = await ctx.getInputConnectionData(NodeConnectionTypes.AiTool, 0);
   } catch {
     return {};
   }
