@@ -33,3 +33,14 @@ export interface MemoryAdapter {
   load(): Promise<ChatMessage[]>;
   save(messages: ChatMessage[]): Promise<void>;
 }
+
+export interface AgentStreamManager {
+  readonly responseText: string;
+  appendText(delta: string): void;
+  sendTaskUpdate(
+    taskId: string,
+    title: string,
+    status: 'pending' | 'in_progress' | 'complete' | 'error',
+    details?: string,
+  ): Promise<void>;
+}

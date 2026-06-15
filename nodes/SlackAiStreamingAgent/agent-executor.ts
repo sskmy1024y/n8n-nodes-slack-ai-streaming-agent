@@ -1,5 +1,4 @@
-import type { SlackStreamManager } from './slack-stream';
-import type { ChatMessage, IntermediateStep } from './types';
+import type { AgentStreamManager, ChatMessage, IntermediateStep } from './types';
 import type { N8nTool } from '../../utils/getConnectedTools';
 
 export interface AgentExecutorOptions {
@@ -8,7 +7,7 @@ export interface AgentExecutorOptions {
   systemPrompt?: string;
   messages: ChatMessage[];
   maxSteps: number;
-  streamManager: SlackStreamManager;
+  streamManager: AgentStreamManager;
 }
 
 export interface AgentExecutorResult {
@@ -175,7 +174,7 @@ function toLangChainMessages(messages: ChatMessage[], systemPrompt?: string): un
 async function runModelTurn(
   model: ChatModel,
   messages: unknown[],
-  streamManager: SlackStreamManager,
+  streamManager: AgentStreamManager,
 ): Promise<{ message: unknown; text: string; toolCalls: ToolCall[] }> {
   if (typeof model.stream === 'function') {
     const stream = await model.stream(messages);

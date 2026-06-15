@@ -16,9 +16,9 @@ describe('SlackAiStreamingAgent node definition', () => {
     expect(desc.version).toBe(1);
   });
 
-  it('requires slackApi credential', () => {
+  it('has optional slackApi credential so debug mode can run without Slack', () => {
     expect(desc.credentials).toEqual([
-      { name: 'slackApi', required: true },
+      { name: 'slackApi', required: false },
     ]);
   });
 
@@ -91,6 +91,11 @@ describe('SlackAiStreamingAgent node definition', () => {
       it('has maxIterations with default 10', () => {
         const maxIter = subOptions.find((o) => o.name === 'maxIterations');
         expect(maxIter!.default).toBe(10);
+      });
+
+      it('has debugMode with default false', () => {
+        const debugMode = subOptions.find((o) => o.name === 'debugMode');
+        expect(debugMode!.default).toBe(false);
       });
 
       it('has streamBufferSize with default 64', () => {

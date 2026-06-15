@@ -11,7 +11,34 @@ import { WebClient } from '@slack/web-api';
 import { getConnectedModel, getConnectedTools, getConnectedMemory, ChatArrayMemory } from '../../utils';
 import { SlackStreamManager } from './slack-stream';
 import { executeAgent } from './agent-executor';
-import type { PromptSource } from './types';
+import type { AgentStreamManager, PromptSource } from './types';
+
+class DebugStreamManager implements AgentStreamManager {
+  private textChunks: string[] = [];
+  readonly taskUpdates: Array<{
+    taskId: string;
+    title: string;
+    status: 'pending' | 'in_progress' | 'complete' | 'error';
+    details?: string;
+  }> = [];
+
+  get responseText(): string {
+    return this.textChunks.join('');
+  }
+
+  appendText(delta: string): void {
+    this.textChunks.push(delta);
+  }
+
+  async sendTaskUpdate(
+    taskId: string,
+    title: string,
+    status: 'pending' | 'in_progress' | 'complete' | 'error',
+    details?: string,
+  ): Promise<void> {
+    this.taskUpdates.push({ taskId, title, status, ...(details ? { details } : {}) });
+  }
+}
 
 export class SlackAiStreamingAgent implements INodeType {
   description: INodeTypeDescription = {
@@ -54,7 +81,7 @@ export class SlackAiStreamingAgent implements INodeType {
     credentials: [
       {
         name: 'slackApi',
-        required: true,
+        required: false,
       },
     ],
     properties: [
@@ -146,6 +173,13 @@ export class SlackAiStreamingAgent implements INodeType {
             description: 'Maximum number of tool call iterations',
           },
           {
+            displayName: 'Debug Mode (No Slack)',
+            name: 'debugMode',
+            type: 'boolean',
+            default: false,
+            description: 'Run the agent inside n8n without calling Slack streaming APIs',
+          },
+          {
             displayName: 'Stream Buffer Size (chars)',
             name: 'streamBufferSize',
             type: 'number',
@@ -187,9 +221,6 @@ export class SlackAiStreamingAgent implements INodeType {
     const items = this.getInputData();
     const returnData: INodeExecutionData[] = [];
 
-    const credentials = await this.getCredentials('slackApi');
-    const slackClient = new WebClient(credentials.accessToken as string);
-
     for (let i = 0; i < items.length; i++) {
       const startTime = Date.now();
 
@@ -201,11 +232,13 @@ export class SlackAiStreamingAgent implements INodeType {
       const systemPrompt = this.getNodeParameter('systemPrompt', i, '') as string;
       const options = this.getNodeParameter('options', i, {}) as {
         maxIterations?: number;
+        debugMode?: boolean;
         streamBufferSize?: number;
         feedbackButtons?: boolean;
         setThreadTitle?: boolean;
         maxTitleLength?: number;
       };
+      const debugMode = options.debugMode ?? false;
 
       let userPrompt: string;
       if (promptSource === 'defineBelow') {
@@ -224,18 +257,32 @@ export class SlackAiStreamingAgent implements INodeType {
         throw new Error('No user prompt found. Check input data or set Prompt Source to "Define Below".');
       }
 
-      const streamManager = new SlackStreamManager({
-        client: slackClient,
-        channel,
-        threadTs,
-        recipientUserId: userId,
-        recipientTeamId: teamId,
-        bufferSize: options.streamBufferSize ?? 64,
-        enableFeedback: options.feedbackButtons ?? false,
-      });
+      let streamManager: AgentStreamManager;
+      let slackClient: WebClient | null = null;
+
+      if (debugMode) {
+        streamManager = new DebugStreamManager();
+      } else {
+        const credentials = await this.getCredentials('slackApi');
+        if (!credentials.accessToken) {
+          throw new Error('Slack credentials are required unless Debug Mode (No Slack) is enabled.');
+        }
+        slackClient = new WebClient(credentials.accessToken as string);
+        streamManager = new SlackStreamManager({
+          client: slackClient,
+          channel,
+          threadTs,
+          recipientUserId: userId,
+          recipientTeamId: teamId,
+          bufferSize: options.streamBufferSize ?? 64,
+          enableFeedback: options.feedbackButtons ?? false,
+        });
+      }
 
       try {
-        await streamManager.setStatus('thinking...');
+        if (streamManager instanceof SlackStreamManager) {
+          await streamManager.setStatus('thinking...');
+        }
 
         const [model, tools, memory] = await Promise.all([
           getConnectedModel(this, i),
@@ -257,7 +304,9 @@ export class SlackAiStreamingAgent implements INodeType {
             userPrompt.length > maxLen
               ? userPrompt.substring(0, maxLen) + '...'
               : userPrompt;
-          void streamManager.setTitle(title);
+          if (streamManager instanceof SlackStreamManager) {
+            void streamManager.setTitle(title);
+          }
         }
 
         const result = await executeAgent({
@@ -269,7 +318,9 @@ export class SlackAiStreamingAgent implements INodeType {
           streamManager,
         });
 
-        await streamManager.stop();
+        if (streamManager instanceof SlackStreamManager) {
+          await streamManager.stop();
+        }
 
         if (memoryAdapter) {
           await memoryAdapter.save([
@@ -284,20 +335,34 @@ export class SlackAiStreamingAgent implements INodeType {
             thread_ts: threadTs,
             response_text: result.responseText,
             intermediate_steps: result.intermediateSteps,
+            connected_tools: tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              hasSchema: tool.schema !== undefined,
+              invoker: tool.invoke ? 'invoke' : tool.call ? 'call' : tool.func ? 'func' : null,
+            })),
+            model_supports_tools: typeof (model as { bindTools?: unknown }).bindTools === 'function',
+            debug_mode: debugMode,
+            task_updates:
+              streamManager instanceof DebugStreamManager ? streamManager.taskUpdates : undefined,
             token_count: result.tokenCount,
             duration_ms: Date.now() - startTime,
           },
         });
       } catch (error) {
-        try { await streamManager.stop(); } catch { /* noop */ }
+        if (streamManager instanceof SlackStreamManager) {
+          try { await streamManager.stop(); } catch { /* noop */ }
+        }
 
-        try {
-          await slackClient.chat.postMessage({
-            channel,
-            thread_ts: threadTs,
-            text: 'An error occurred while processing your request. Please try again.',
-          });
-        } catch { /* noop */ }
+        if (slackClient) {
+          try {
+            await slackClient.chat.postMessage({
+              channel,
+              thread_ts: threadTs,
+              text: 'An error occurred while processing your request. Please try again.',
+            });
+          } catch { /* noop */ }
+        }
 
         throw error;
       }
