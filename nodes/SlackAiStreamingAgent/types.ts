@@ -1,5 +1,3 @@
-import type { CoreMessage } from 'ai';
-
 export interface FeedbackBlock {
   type: 'context_actions';
   elements: Array<{
@@ -18,6 +16,12 @@ export interface FeedbackBlock {
 
 export type PromptSource = 'takePreviousNode' | 'defineBelow';
 
+export type ChatMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string | Array<Record<string, unknown>> }
+  | { role: 'tool'; content: Array<Record<string, unknown>> };
+
 export interface IntermediateStep {
   toolName: string;
   toolCallId: string;
@@ -26,6 +30,6 @@ export interface IntermediateStep {
 }
 
 export interface MemoryAdapter {
-  load(): Promise<CoreMessage[]>;
-  save(messages: CoreMessage[]): Promise<void>;
+  load(): Promise<ChatMessage[]>;
+  save(messages: ChatMessage[]): Promise<void>;
 }

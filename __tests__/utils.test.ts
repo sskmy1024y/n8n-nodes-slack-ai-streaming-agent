@@ -240,39 +240,60 @@ describe('getConnectedModel', () => {
       }),
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
-    await getConnectedModel(mockCtx, 2);
+    const model = await getConnectedModel(mockCtx, 2);
 
     expect(mockCtx.getInputConnectionData).toHaveBeenCalledWith(
       NodeConnectionTypes.AiLanguageModel,
       0,
     );
+    expect(model).toBe(mockModel);
   });
 });
 
 // --- getConnectedTools tests ---
 
 describe('getConnectedTools', () => {
-  it('returns empty object when no tools connected', async () => {
+  it('returns empty array when no tools connected', async () => {
     const { getConnectedTools } = await import('../utils/getConnectedTools');
     const mockCtx = {
-      getInputConnectionData: jest.fn().mockRejectedValue(new Error('no connection')),
+      getInputConnectionData: jest.fn().mockResolvedValue([]),
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const tools = await getConnectedTools(mockCtx);
-    expect(tools).toEqual({});
+    expect(tools).toEqual([]);
   });
 
-  it('returns empty object when null tools', async () => {
+  it('propagates tool connection errors instead of treating them as no tools', async () => {
+    const { getConnectedTools } = await import('../utils/getConnectedTools');
+    const mockCtx = {
+      getInputConnectionData: jest.fn().mockRejectedValue(new Error('Error in sub-node Tool')),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    await expect(getConnectedTools(mockCtx)).rejects.toThrow('Error in sub-node Tool');
+  });
+
+  it('throws when connected tool data has no compatible tool shape', async () => {
+    const { getConnectedTools } = await import('../utils/getConnectedTools');
+    const mockCtx = {
+      getInputConnectionData: jest.fn().mockResolvedValue([{ response: 'not a tool' }]),
+    } as unknown as import('n8n-workflow').IExecuteFunctions;
+
+    await expect(getConnectedTools(mockCtx)).rejects.toThrow(
+      'Connected AI tool data did not contain any compatible tools',
+    );
+  });
+
+  it('returns empty array when null tools', async () => {
     const { getConnectedTools } = await import('../utils/getConnectedTools');
     const mockCtx = {
       getInputConnectionData: jest.fn().mockResolvedValue(null),
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const tools = await getConnectedTools(mockCtx);
-    expect(tools).toEqual({});
+    expect(tools).toEqual([]);
   });
 
-  it('converts a single n8n tool to AI SDK tool', async () => {
+  it('returns a single n8n tool unchanged', async () => {
     const { getConnectedTools } = await import('../utils/getConnectedTools');
     const mockTool = {
       name: 'my_tool',
@@ -285,8 +306,7 @@ describe('getConnectedTools', () => {
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const tools = await getConnectedTools(mockCtx);
-    expect(tools).toHaveProperty('my_tool');
-    expect(tools['my_tool']).toHaveProperty('execute');
+    expect(tools).toEqual([mockTool]);
   });
 
   it('reads tool connections from index 0 even for later main input items', async () => {
@@ -307,7 +327,7 @@ describe('getConnectedTools', () => {
     const tools = await getConnectedTools(mockCtx, 3);
 
     expect(mockCtx.getInputConnectionData).toHaveBeenCalledWith(NodeConnectionTypes.AiTool, 0);
-    expect(tools).toHaveProperty('shared_tool');
+    expect(tools).toEqual([mockTool]);
   });
 
   it('flattens nested tool arrays', async () => {
@@ -321,7 +341,7 @@ describe('getConnectedTools', () => {
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const tools = await getConnectedTools(mockCtx);
-    expect(Object.keys(tools)).toEqual(['tool_a', 'tool_b']);
+    expect(tools.map((t) => t.name)).toEqual(['tool_a', 'tool_b']);
   });
 
   it('executes a tool that only exposes func/call (no invoke)', async () => {
@@ -334,12 +354,9 @@ describe('getConnectedTools', () => {
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const tools = await getConnectedTools(mockCtx);
-    expect(Object.keys(tools)).toEqual(['legacy_tool']);
+    expect(tools.map((t) => t.name)).toEqual(['legacy_tool']);
 
-    const execute = (tools['legacy_tool'] as unknown as {
-      execute: (args: Record<string, unknown>) => Promise<unknown>;
-    }).execute;
-    const result = await execute({ x: 1 });
+    const result = await tools[0].call?.({ x: 1 });
     expect(callFn).toHaveBeenCalledWith({ x: 1 });
     expect(result).toBe('called');
   });
@@ -359,7 +376,7 @@ describe('getConnectedTools', () => {
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const tools = await getConnectedTools(mockCtx);
-    expect(Object.keys(tools)).toEqual(['mcp_search', 'mcp_fetch']);
+    expect(tools.map((t) => t.name)).toEqual(['mcp_search', 'mcp_fetch']);
   });
 
   it('mixes plain tools and a toolkit in one connection', async () => {
@@ -372,10 +389,10 @@ describe('getConnectedTools', () => {
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const tools = await getConnectedTools(mockCtx);
-    expect(Object.keys(tools).sort()).toEqual(['calculator', 'mcp_list']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['calculator', 'mcp_list']);
   });
 
-  it('preserves a zod schema from a differing zod instance (duck-typed)', async () => {
+  it('keeps a zod schema on the original n8n tool', async () => {
     const { getConnectedTools } = await import('../utils/getConnectedTools');
     // Simulate a zod schema produced by n8n's bundled (different) zod instance.
     const foreignZodSchema = {
@@ -395,8 +412,7 @@ describe('getConnectedTools', () => {
     } as unknown as import('n8n-workflow').IExecuteFunctions;
 
     const tools = await getConnectedTools(mockCtx);
-    // The schema object is forwarded as-is, not replaced with z.record fallback.
-    expect((tools['mcp_with_args'] as { parameters: unknown }).parameters).toBe(foreignZodSchema);
+    expect(tools[0].schema).toBe(foreignZodSchema);
   });
 });
 

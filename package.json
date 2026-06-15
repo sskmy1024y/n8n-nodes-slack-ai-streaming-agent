@@ -31,12 +31,7 @@
     ]
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^1.0.0",
-    "@ai-sdk/google": "^1.0.0",
-    "@ai-sdk/openai": "^1.0.0",
-    "@slack/web-api": "^7.0.0",
-    "ai": "^4.0.0",
-    "zod": "^3.22.0"
+    "@slack/web-api": "^7.0.0"
   },
   "peerDependencies": {
     "n8n-workflow": "*"
