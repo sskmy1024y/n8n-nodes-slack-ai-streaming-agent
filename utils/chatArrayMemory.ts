@@ -1,6 +1,5 @@
-import type { CoreMessage } from 'ai';
 import type { N8nMemory } from './getConnectedMemory';
-import type { MemoryAdapter } from '../nodes/SlackAiStreamingAgent/types';
+import type { ChatMessage, MemoryAdapter } from '../nodes/SlackAiStreamingAgent/types';
 
 /**
  * Get the message type from a LangChain message object.
@@ -60,10 +59,10 @@ function getMessageContent(msg: unknown): string {
 }
 
 /**
- * Bridges n8n's LangChain-based memory with Vercel AI SDK's CoreMessage[] format.
+ * Bridges n8n's LangChain-based memory with the agent's message format.
  *
- * Reads from memory: LangChain messages → CoreMessage[]
- * Writes to memory: CoreMessage[] → LangChain messages
+ * Reads from memory: LangChain messages → ChatMessage[]
+ * Writes to memory: ChatMessage[] → LangChain messages
  */
 export class ChatArrayMemory implements MemoryAdapter {
   private memory: N8nMemory;
@@ -74,9 +73,9 @@ export class ChatArrayMemory implements MemoryAdapter {
     this.maxMessages = maxMessages;
   }
 
-  async load(): Promise<CoreMessage[]> {
+  async load(): Promise<ChatMessage[]> {
     const langchainMessages = await this.memory.chatHistory.getMessages();
-    const coreMessages: CoreMessage[] = [];
+    const coreMessages: ChatMessage[] = [];
 
     for (const msg of langchainMessages) {
       const msgType = getMessageType(msg);
@@ -90,7 +89,7 @@ export class ChatArrayMemory implements MemoryAdapter {
           try {
             const parsed = JSON.parse(content);
             if (Array.isArray(parsed)) {
-              for (const m of parsed as CoreMessage[]) {
+              for (const m of parsed as ChatMessage[]) {
                 if (m.role && m.content !== undefined) {
                   coreMessages.push(m);
                 }
@@ -118,7 +117,7 @@ export class ChatArrayMemory implements MemoryAdapter {
     return coreMessages;
   }
 
-  async save(messages: CoreMessage[]): Promise<void> {
+  async save(messages: ChatMessage[]): Promise<void> {
     // Find the new user and assistant messages to persist.
     // We save the user message as a human message and
     // the assistant response (+ any tool calls/results) as a single AI message.

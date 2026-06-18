@@ -284,6 +284,13 @@ export class SlackAiStreamingAgent implements INodeType {
             thread_ts: threadTs,
             response_text: result.responseText,
             intermediate_steps: result.intermediateSteps,
+            connected_tools: tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              hasSchema: tool.schema !== undefined,
+              invoker: tool.invoke ? 'invoke' : tool.call ? 'call' : tool.func ? 'func' : null,
+            })),
+            model_supports_tools: typeof (model as { bindTools?: unknown }).bindTools === 'function',
             token_count: result.tokenCount,
             duration_ms: Date.now() - startTime,
           },
